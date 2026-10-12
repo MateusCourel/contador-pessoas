@@ -1,0 +1,24 @@
+﻿# ambiente, cache e backups
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.bak*
+contador-pessoas_backup_*/
+aplicar_*.py
+.vscode/
+*.log
+
+# DADOS PESSOAIS / BIOMETRIA: nunca subir
+dados/*
+!dados/.gitkeep
+*.db
+*.sqlite
+
+# modelos (o README ensina a baixar)
+*.task
+*.onnx
+*.pt
+*.param
+*.bin
+yolo11n_ncnn_model/
