@@ -16,6 +16,10 @@ Etapas prontas nesta versão:
 | `etapa4_cadastro.py` | Cadastro completo: gesto, aviso, 5 poses, nome, gravação |
 | `reconhecer_teste.py` | Mostra o nome de quem está na frente da câmera |
 | `cadastros.py` | Lista e apaga cadastros |
+| `teclado.py` | Teclado virtual para a tela touch (com acentos) |
+| `etapa5_cadastro_touch.py` | Cadastro todo pelo toque, em tela cheia |
+| `teste_toque.py` | Mostra onde o toque cai, para conferir a precisão |
+| `test_teclado.py` | Testes do teclado virtual (não precisa de tela) |
 | `test_banco.py` | Testes do banco (não precisa de câmera) |
 | `test_gatilho.py` | Testes da lógica de segurar 1 s (não precisa de câmera) |
 | `test_poses.py` | Testes da lógica das poses (não precisa de câmera) |
@@ -121,6 +125,23 @@ No cadastro: mão aberta 1 s, aceitar o aviso (**S**), olhar de frente, as 5
 poses, digitar o nome e **ENTER**. **ESC** cancela. Só os embeddings ficam
 em `dados/pessoas.db`; as fotos não são guardadas.
 
+**Etapa 5 — cadastro pela tela touch:**
+
+```bash
+python test_teclado.py          # deve terminar com OK
+python teste_toque.py           # confere se o toque acerta (Q sai)
+python etapa5_cadastro_touch.py            # tela cheia, para o monitor touch
+python etapa5_cadastro_touch.py --janela   # em janela, para testar
+```
+
+Tudo pode ser feito com o dedo: **CADASTRAR** (ou mão aberta), **ACEITO**,
+as 5 poses e o nome no teclado da tela. A primeira letra de cada palavra sai
+maiúscula sozinha. Para acentuar, toque no acento (´ ` ^ ~) e depois na vogal
+(`~` + `a` = ã). Nomes repetidos são recusados. O teclado do computador também
+funciona. Para os acentos aparecerem na tela é preciso ter o Pillow e a fonte
+DejaVu (`sudo apt install python3-pil fonts-dejavu-core`); sem eles o
+teclado funciona do mesmo jeito, só que sem acentos desenhados.
+
 ### Usando o Thonny
 
 Em **Ferramentas → Opções → Interpretador → Alternative Python 3 executable**,
@@ -178,7 +199,7 @@ mostra `(contador)` no começo da linha quando está ativo).
 - [x] 2. Gesto da mão aberta como gatilho
 - [x] 3. Detectar rosto e direção da cabeça (pose guiada)
 - [x] 4. Cadastro com embeddings + SQLite
-- [ ] 5. Tela touch com teclado virtual
+- [x] 5. Tela touch com teclado virtual
 - [ ] 6. Contagem de pessoas (YOLO) e reconhecimento de quem passa
 - [ ] 7. Painel web, mapa de calor e alertas
 - [ ] 8. Medir a taxa de acerto e melhorar o reconhecimento

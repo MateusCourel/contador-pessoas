@@ -79,6 +79,12 @@ class Banco:
             FROM pessoas p LEFT JOIN embeddings e ON e.pessoa_id = p.id
             GROUP BY p.id ORDER BY p.id""").fetchall()
 
+    def existe_nome(self, nome):
+        """True se já há alguém com esse nome (ignora maiúsculas e espaços)."""
+        alvo = " ".join(nome.lower().split())
+        return any(" ".join(n.lower().split()) == alvo
+                   for _, n, _, _ in self.listar())
+
     def apagar(self, pessoa_id):
         """Apaga a pessoa e todos os embeddings dela. True se existia."""
         with self._con:

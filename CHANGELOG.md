@@ -1,5 +1,11 @@
 # Histórico do projeto
 
+## v0.5 — Tela touch com teclado virtual
+- `teclado.py`: teclado na tela com maiúsculas automáticas, SHIFT e acentos
+- `etapa5_cadastro_touch.py`: cadastro completo pelo toque, em tela cheia
+- `teste_toque.py` para conferir a precisão do toque
+- `banco.existe_nome` evita cadastros duplicados
+
 ## v0.4 — Cadastro com embeddings
 - `banco.py` (SQLite), `embeddings.py` (SFace), `etapa4_cadastro.py`
 - `reconhecer_teste.py` e `cadastros.py` (listar/apagar, LGPD)

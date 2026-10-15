@@ -45,6 +45,11 @@ class TesteBanco(unittest.TestCase):
     def test_banco_vazio(self):
         self.assertEqual(self.b.identificar(vetor(1)), (None, 0.0))
 
+    def test_existe_nome(self):
+        self.b.cadastrar("Ana Paula", {"centro": vetor(1)})
+        self.assertTrue(self.b.existe_nome("  ana   paula "))
+        self.assertFalse(self.b.existe_nome("Ana"))
+
     def test_apagar_remove_tudo(self):
         pid = self.b.cadastrar("Ana", {"centro": vetor(1), "cima": vetor(2)})
         self.assertTrue(self.b.apagar(pid))
