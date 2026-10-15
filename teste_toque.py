@@ -26,7 +26,9 @@ def main():
             print(f"toque em x={x}, y={y}")
 
     cv2.namedWindow(JANELA, cv2.WINDOW_NORMAL)
-    if "--janela" not in sys.argv:
+    if "--janela" in sys.argv:
+        cv2.resizeWindow(JANELA, 1180, 664)     # cabe na tela de 1280x800
+    else:
         cv2.setWindowProperty(JANELA, cv2.WND_PROP_FULLSCREEN,
                               cv2.WINDOW_FULLSCREEN)
     cv2.setMouseCallback(JANELA, ao_clicar)

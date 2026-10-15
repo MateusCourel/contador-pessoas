@@ -5,8 +5,8 @@ Rodar:  python test_poses.py
 import unittest
 
 import poses
-from poses import (CalibradorDeFrente, GuiaDePoses, classificar_pose,
-                   razoes_da_cabeca)
+from poses import (CalibradorDeFrente, GuiaDePoses, Suavizador,
+                   classificar_pose, razoes_da_cabeca)
 
 
 def rosto_falso(nariz_x=0.5, nariz_y=0.6, invertido=False):
@@ -89,6 +89,55 @@ class TesteCalibrador(unittest.TestCase):
         self.assertEqual(c.progresso, 0.0)
         c.adicionar(0.5, 0.6)
         self.assertEqual(c.progresso, 0.5)
+
+
+class TesteCalibradorEstavel(unittest.TestCase):
+    def test_espera_a_cabeca_parar(self):
+        c = CalibradorDeFrente(amostras=5, exigir_estavel=True)
+        # cabeça se mexendo: nunca fica pronto
+        for yaw in (0.3, 0.7, 0.3, 0.7, 0.3, 0.7):
+            c.adicionar(yaw, 0.6)
+        self.assertFalse(c.pronto)
+        # agora parada: as leituras antigas saem da janela
+        for _ in range(5):
+            c.adicionar(0.52, 0.61)
+        self.assertTrue(c.pronto)
+        self.assertAlmostEqual(c.base_yaw, 0.52)
+        self.assertAlmostEqual(c.base_pitch, 0.61)
+
+    def test_progresso_so_chega_a_um_quando_pronto(self):
+        c = CalibradorDeFrente(amostras=4, exigir_estavel=True)
+        for yaw in (0.3, 0.7, 0.3, 0.7):
+            c.adicionar(yaw, 0.6)
+        self.assertLess(c.progresso, 1.0)
+
+    def test_aceita_depois_de_muito_tempo(self):
+        c = CalibradorDeFrente(amostras=4, exigir_estavel=True, paciencia=3)
+        for i in range(12):
+            c.adicionar(0.3 if i % 2 else 0.7, 0.6)
+        self.assertTrue(c.pronto)
+
+    def test_reiniciar(self):
+        c = CalibradorDeFrente(amostras=2, exigir_estavel=True)
+        c.adicionar(0.5, 0.6)
+        c.adicionar(0.5, 0.6)
+        self.assertTrue(c.pronto)
+        c.reiniciar()
+        self.assertFalse(c.pronto)
+
+
+class TesteSuavizador(unittest.TestCase):
+    def test_suaviza_um_pico(self):
+        s = Suavizador(alpha=0.5)
+        s.atualizar(0.5, 0.6)
+        yaw, _ = s.atualizar(0.9, 0.6)
+        self.assertAlmostEqual(yaw, 0.7)
+
+    def test_sem_rosto_reinicia(self):
+        s = Suavizador()
+        s.atualizar(0.5, 0.6)
+        self.assertEqual(s.atualizar(None, None), (None, None))
+        self.assertEqual(s.atualizar(0.8, 0.7), (0.8, 0.7))
 
 
 class TesteGuia(unittest.TestCase):

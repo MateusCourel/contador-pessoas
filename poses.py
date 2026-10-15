@@ -72,39 +72,89 @@ def classificar_pose(yaw, pitch, base_yaw=0.5, base_pitch=0.6,
 
 
 class CalibradorDeFrente:
-    """Junta amostras com a pessoa olhando de frente e tira a média."""
+    """Junta amostras com a pessoa olhando de frente e tira a média.
 
-    def __init__(self, amostras=30):
+    Com exigir_estavel=True, só calibra quando as últimas `amostras` leituras
+    estão paradas (variação pequena). Isso evita guardar como "frente" um
+    momento em que a pessoa ainda mexia a cabeça. Se nunca ficar estável,
+    aceita a janela mais recente depois de `amostras * paciencia` leituras."""
+
+    def __init__(self, amostras=30, exigir_estavel=False, var_yaw=0.06,
+                 var_pitch=0.04, paciencia=6):
         self.amostras = amostras
-        self._yaw = []
-        self._pitch = []
+        self.exigir_estavel = exigir_estavel
+        self.var_yaw = var_yaw
+        self.var_pitch = var_pitch
+        self.paciencia = paciencia
         self.base_yaw = 0.5
         self.base_pitch = 0.6
+        self.reiniciar()
 
     @property
     def pronto(self):
-        return len(self._yaw) >= self.amostras
+        return self._pronto
 
     @property
     def progresso(self):
-        return min(len(self._yaw) / self.amostras, 1.0)
+        if self._pronto:
+            return 1.0
+        return min(len(self._yaw) / self.amostras, 1.0) * \
+            (0.95 if self.exigir_estavel else 1.0)
+
+    def _estavel(self):
+        return (max(self._yaw) - min(self._yaw) <= self.var_yaw and
+                max(self._pitch) - min(self._pitch) <= self.var_pitch)
 
     def adicionar(self, yaw, pitch):
-        """Devolve True quando juntou amostras suficientes."""
-        if self.pronto:
+        """Devolve True quando a calibração terminou."""
+        if self._pronto:
             return True
         if yaw is None or pitch is None:
             return False
         self._yaw.append(yaw)
         self._pitch.append(pitch)
-        if self.pronto:
+        self._vistas += 1
+        if self.exigir_estavel:
+            self._yaw = self._yaw[-self.amostras:]
+            self._pitch = self._pitch[-self.amostras:]
+            cheia = len(self._yaw) >= self.amostras
+            cansou = self._vistas >= self.amostras * self.paciencia
+            self._pronto = cheia and (self._estavel() or cansou)
+        else:
+            self._pronto = len(self._yaw) >= self.amostras
+        if self._pronto:
             self.base_yaw = sum(self._yaw) / len(self._yaw)
             self.base_pitch = sum(self._pitch) / len(self._pitch)
-        return self.pronto
+        return self._pronto
 
     def reiniciar(self):
-        self._yaw.clear()
-        self._pitch.clear()
+        self._yaw, self._pitch = [], []
+        self._vistas = 0
+        self._pronto = False
+
+
+class Suavizador:
+    """Média móvel exponencial de (yaw, pitch): tira a tremida dos pontos.
+    alpha menor = mais suave (e um pouco mais lento para reagir)."""
+
+    def __init__(self, alpha=0.5):
+        self.alpha = alpha
+        self._valor = None
+
+    def atualizar(self, yaw, pitch):
+        if yaw is None or pitch is None:
+            self._valor = None
+            return None, None
+        if self._valor is None:
+            self._valor = (yaw, pitch)
+        else:
+            a = self.alpha
+            self._valor = (a * yaw + (1 - a) * self._valor[0],
+                           a * pitch + (1 - a) * self._valor[1])
+        return self._valor
+
+    def reiniciar(self):
+        self._valor = None
 
 
 class GuiaDePoses:

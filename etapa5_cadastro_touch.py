@@ -26,12 +26,22 @@ from etapa4_cadastro import (AVISO, CALIBRAR, ESPERA, FIM, INSTRUCOES, NOME,
                              POSES, ROTULOS, barra, lista_de_poses, texto)
 from gestos import (GESTO_MAO_ABERTA, DetectorDeGestos, GatilhoPorTempo,
                     desenhar_mao)
-from poses import (CalibradorDeFrente, GuiaDePoses, classificar_pose,
-                   razoes_da_cabeca)
+from embeddings import LARGURA_MINIMA
+from poses import (CalibradorDeFrente, GuiaDePoses, Suavizador,
+                   classificar_pose, razoes_da_cabeca)
 from rosto import DetectorDeRosto, desenhar_rosto
 from teclado import TecladoVirtual
 
 JANELA = "Cadastro"
+PREPARO_S = 1.5      # tempo para se ajeitar de frente antes de calibrar
+
+
+def largura_do_rosto(pontos, w):
+    """Largura do rosto em pixels (para avisar quando está longe demais)."""
+    if not pontos:
+        return 0
+    xs = [p[0] for p in pontos]
+    return int((max(xs) - min(xs)) * w)
 VERDE, VERMELHO = (60, 160, 60), (50, 50, 170)
 
 
@@ -68,14 +78,18 @@ def main():
     banco = Banco()
 
     cv2.namedWindow(JANELA, cv2.WINDOW_NORMAL)
-    if not em_janela:
+    if em_janela:
+        cv2.resizeWindow(JANELA, 1180, 664)     # cabe na tela de 1280x800
+    else:
         cv2.setWindowProperty(JANELA, cv2.WND_PROP_FULLSCREEN,
                               cv2.WINDOW_FULLSCREEN)
     cv2.setMouseCallback(JANELA, ao_clicar)
 
     estado = ESPERA
     gatilho = GatilhoPorTempo(segurar_s=1.0, recarga_s=2.0)
-    calibrador = CalibradorDeFrente(amostras=30)
+    calibrador = CalibradorDeFrente(amostras=20, exigir_estavel=True)
+    suavizador = Suavizador(alpha=0.5)
+    inicio_calibracao = 0.0
     guia = GuiaDePoses()
     teclado = None
     capturas = {}
@@ -91,6 +105,7 @@ def main():
         nonlocal estado, capturas, nome, pedir_ok
         estado, capturas, nome, pedir_ok = ESPERA, {}, "", False
         calibrador.reiniciar()
+        suavizador.reiniciar()
         guia.reiniciar()
         if teclado:
             teclado.reiniciar()
@@ -143,7 +158,7 @@ def main():
                 botao(frame, b_aceito, "ACEITO", VERDE)
                 botao(frame, b_recusa, "CANCELAR", VERMELHO)
                 if clique and dentro(b_aceito, *clique):
-                    estado = CALIBRAR
+                    estado, inicio_calibracao = CALIBRAR, time.monotonic()
                 elif clique and dentro(b_recusa, *clique):
                     recomecar("CADASTRO CANCELADO")
 
@@ -151,13 +166,24 @@ def main():
                 pontos = rosto.detectar(frame)
                 desenhar_rosto(frame, pontos)
                 r = razoes_da_cabeca(pontos)
-                calibrador.adicionar(*(r if r else (None, None)))
-                texto(frame, "FIQUE PARADO, OLHANDO DE FRENTE", (40, 50),
-                      1.1, (0, 255, 255), 3)
-                if r is None:
+                preparando = time.monotonic() - inicio_calibracao < PREPARO_S
+                if not preparando:
+                    yaw_s, pitch_s = suavizador.atualizar(*(r or (None, None)))
+                    calibrador.adicionar(yaw_s, pitch_s)
+                if preparando:
+                    texto(frame, "OLHE PARA A CAMERA...", (40, 50), 1.1,
+                          (0, 255, 255), 3)
+                else:
+                    texto(frame, "FIQUE PARADO, OLHANDO DE FRENTE", (40, 50),
+                          1.1, (0, 255, 255), 3)
+                if r is None and not preparando:
                     texto(frame, "(nenhum rosto encontrado)", (40, 95), 0.9,
                           (0, 0, 255))
-                barra(frame, calibrador.progresso, (0, 200, 255))
+                elif largura_do_rosto(pontos, w) < LARGURA_MINIMA:
+                    texto(frame, "ROSTO PEQUENO: CHEGUE UM POUCO MAIS PERTO",
+                          (40, 95), 0.9, (0, 0, 255))
+                barra(frame, 0.0 if preparando else calibrador.progresso,
+                      (0, 200, 255))
                 botao(frame, b_cancelar, "CANCELAR", VERMELHO)
                 if clique and dentro(b_cancelar, *clique):
                     recomecar("CADASTRO CANCELADO")
@@ -167,7 +193,7 @@ def main():
             elif estado == POSES:
                 pontos = rosto.detectar(frame)
                 r = razoes_da_cabeca(pontos)
-                yaw, pitch = r if r else (None, None)
+                yaw, pitch = suavizador.atualizar(*(r or (None, None)))
                 pose = classificar_pose(yaw, pitch, calibrador.base_yaw,
                                         calibrador.base_pitch)
                 progresso, confirmou = guia.update(pose)
@@ -176,7 +202,8 @@ def main():
                     emb = extrator.extrair(frame, pontos)
                     if emb is None:
                         guia.indice -= 1         # refaz só esta pose
-                        avisar("CHEGUE MAIS PERTO", 2.0)
+                        avisar(f"ROSTO PEQUENO ({largura_do_rosto(pontos, w)}"
+                               f" px): CHEGUE MAIS PERTO", 2.0)
                     else:
                         capturas[nome_da_pose] = emb
                         print(f">>> pose capturada: {ROTULOS[nome_da_pose]}")
@@ -189,6 +216,11 @@ def main():
                     texto(frame, INSTRUCOES[guia.passo_atual], (40, 50), 1.1,
                           (0, 255, 255), 3)
                     barra(frame, progresso)
+                    # leitura ao vivo: ajuda a entender por que uma pose não
+                    # confirma (pose lida x pose pedida)
+                    texto(frame, f"lido: {pose or 'sem rosto'}   "
+                          f"rosto: {largura_do_rosto(pontos, w)} px",
+                          (40, h - 80), 0.7, (255, 255, 255), 2)
                     botao(frame, b_cancelar, "CANCELAR", VERMELHO)
                     if clique and dentro(b_cancelar, *clique):
                         recomecar("CADASTRO CANCELADO")
@@ -232,7 +264,7 @@ def main():
                 recomecar("CADASTRO CANCELADO")
             elif estado == AVISO:
                 if tecla in (ord("s"), ord("S")):
-                    estado = CALIBRAR
+                    estado, inicio_calibracao = CALIBRAR, time.monotonic()
                 elif tecla in (ord("n"), ord("N")):
                     recomecar("CADASTRO CANCELADO")
             elif estado == NOME and tecla != 255:
