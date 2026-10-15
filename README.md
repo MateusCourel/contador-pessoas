@@ -8,7 +8,11 @@ Etapas prontas nesta versão:
 | `gestos.py` | Detecta a **mão aberta** e só dispara depois de segurar **1 segundo** |
 | `etapa1_camera.py` | Mostra a câmera ao vivo com os FPS |
 | `etapa2_gesto.py` | Detecta o gesto, mostra barra de progresso e "dispara o cadastro" |
+| `rosto.py` | Acha o rosto (478 pontos) e desenha a malha |
+| `poses.py` | Lógica das poses da cabeça: frente, esquerda, direita, cima, baixo |
+| `etapa3_rosto.py` | Calibra o "olhar de frente" e guia as 5 poses |
 | `test_gatilho.py` | Testes da lógica de segurar 1 s (não precisa de câmera) |
+| `test_poses.py` | Testes da lógica das poses (não precisa de câmera) |
 
 ## 1. Instalar (uma vez só)
 
@@ -34,6 +38,12 @@ Baixe o modelo de gestos do Google (fica na mesma pasta dos arquivos .py):
 
 ```bash
 wget -O gesture_recognizer.task https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/latest/gesture_recognizer.task
+```
+
+Baixe também o modelo de rosto (etapa 3):
+
+```bash
+wget -O face_landmarker.task https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task
 ```
 
 ## 2. Rodar
@@ -69,6 +79,23 @@ Mostre a palma aberta para a câmera e segure. Uma barra enche durante 1 segundo
 ao completar aparece "CADASTRO INICIADO!" na tela e no terminal. Tire a mão e
 espere ~3 s para poder disparar de novo.
 
+**Etapa 3 — rosto e poses da cabeça:**
+
+```bash
+python test_poses.py      # deve terminar com OK
+python etapa3_rosto.py
+```
+
+Primeiro fique parado olhando de frente até a barra laranja encher
+(calibração). Depois siga os pedidos na tela: frente, esquerda, direita, cima
+e baixo, segurando cada pose ~1 s. Teclas: **R** recomeça as poses, **C**
+calibra de novo, **Q** sai. No terminal aparece `>>> pose confirmada: ...`
+(na etapa 4 é aí que a foto será tirada).
+
+Se alguma pose ficar difícil ou fácil demais, ajuste `LIMITE_YAW` e
+`LIMITE_PITCH` em `poses.py`. Se "cima" e "baixo" aparecerem trocados, mude
+`INVERTER_CIMA_BAIXO` para `True`.
+
 ### Usando o Thonny
 
 Em **Ferramentas → Opções → Interpretador → Alternative Python 3 executable**,
@@ -88,7 +115,16 @@ aponte para `/home/SEU_USUARIO/contador/bin/python`. Depois abra
 - **Gesto mais ou menos "sensível":** em `etapa2_gesto.py`, mude `segurar_s`
   (tempo segurando) ou, em `DetectorDeGestos`, a `confianca_minima`.
 
+- **Webcam USB (Logitech C270):** o `camera.py` abre pelo libcamera e já troca
+  vermelho/azul sozinho, a 30 FPS. O FPS fixo é feito com
+  `v4l2-ctl --set-ctrl=exposure_dynamic_framerate=0`.
+
 ## 4. Problemas comuns
+
+**Janela não abre / "Nenhuma câmera encontrada" logo depois de ter funcionado**
+Um programa antigo ainda está segurando a câmera. **Não use Ctrl+Z** para
+sair (isso só suspende e a câmera continua presa). Use **Q** na janela ou
+Ctrl+C. Para liberar à força: `pkill -9 -f etapa`.
 
 **"Nenhuma câmera encontrada"**
 Rode `rpicam-hello --list-cameras`. Se a câmera CSI não aparecer, veja o cabo
@@ -115,7 +151,7 @@ mostra `(contador)` no começo da linha quando está ativo).
 
 - [x] 1. Câmera ao vivo (CSI ou USB)
 - [x] 2. Gesto da mão aberta como gatilho
-- [ ] 3. Detectar rosto e direção da cabeça (pose guiada)
+- [x] 3. Detectar rosto e direção da cabeça (pose guiada)
 - [ ] 4. Cadastro com embeddings + SQLite
 - [ ] 5. Tela touch com teclado virtual
 - [ ] 6. Contagem de pessoas (YOLO) e reconhecimento de quem passa
