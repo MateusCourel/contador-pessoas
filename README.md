@@ -11,6 +11,12 @@ Etapas prontas nesta versão:
 | `rosto.py` | Acha o rosto (478 pontos) e desenha a malha |
 | `poses.py` | Lógica das poses da cabeça: frente, esquerda, direita, cima, baixo |
 | `etapa3_rosto.py` | Calibra o "olhar de frente" e guia as 5 poses |
+| `banco.py` | Guarda pessoas e embeddings no SQLite (`dados/pessoas.db`) |
+| `embeddings.py` | Transforma o rosto em 128 números (modelo SFace) |
+| `etapa4_cadastro.py` | Cadastro completo: gesto, aviso, 5 poses, nome, gravação |
+| `reconhecer_teste.py` | Mostra o nome de quem está na frente da câmera |
+| `cadastros.py` | Lista e apaga cadastros |
+| `test_banco.py` | Testes do banco (não precisa de câmera) |
 | `test_gatilho.py` | Testes da lógica de segurar 1 s (não precisa de câmera) |
 | `test_poses.py` | Testes da lógica das poses (não precisa de câmera) |
 
@@ -44,6 +50,12 @@ Baixe também o modelo de rosto (etapa 3):
 
 ```bash
 wget -O face_landmarker.task https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task
+```
+
+E o modelo de reconhecimento (etapa 4):
+
+```bash
+wget -O face_recognition_sface_2021dec.onnx https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx
 ```
 
 ## 2. Rodar
@@ -95,6 +107,19 @@ calibra de novo, **Q** sai. No terminal aparece `>>> pose confirmada: ...`
 Se alguma pose ficar difícil ou fácil demais, ajuste `LIMITE_YAW` e
 `LIMITE_PITCH` em `poses.py`. Se "cima" e "baixo" aparecerem trocados, mude
 `INVERTER_CIMA_BAIXO` para `True`.
+
+**Etapa 4 — cadastrar uma pessoa:**
+
+```bash
+python test_banco.py          # deve terminar com OK
+python etapa4_cadastro.py     # cadastra
+python reconhecer_teste.py    # confere se reconhece
+python cadastros.py           # lista; "apagar 3" apaga a pessoa de id 3
+```
+
+No cadastro: mão aberta 1 s, aceitar o aviso (**S**), olhar de frente, as 5
+poses, digitar o nome e **ENTER**. **ESC** cancela. Só os embeddings ficam
+em `dados/pessoas.db`; as fotos não são guardadas.
 
 ### Usando o Thonny
 
@@ -152,7 +177,7 @@ mostra `(contador)` no começo da linha quando está ativo).
 - [x] 1. Câmera ao vivo (CSI ou USB)
 - [x] 2. Gesto da mão aberta como gatilho
 - [x] 3. Detectar rosto e direção da cabeça (pose guiada)
-- [ ] 4. Cadastro com embeddings + SQLite
+- [x] 4. Cadastro com embeddings + SQLite
 - [ ] 5. Tela touch com teclado virtual
 - [ ] 6. Contagem de pessoas (YOLO) e reconhecimento de quem passa
 - [ ] 7. Painel web, mapa de calor e alertas

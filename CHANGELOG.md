@@ -1,5 +1,10 @@
 # Histórico do projeto
 
+## v0.4 — Cadastro com embeddings
+- `banco.py` (SQLite), `embeddings.py` (SFace), `etapa4_cadastro.py`
+- `reconhecer_teste.py` e `cadastros.py` (listar/apagar, LGPD)
+- Aviso de privacidade e consentimento antes de cadastrar
+
 ## v0.3 — Rosto e poses da cabeça
 - `rosto.py`: malha facial de 478 pontos (MediaPipe FaceLandmarker)
 - `poses.py`: yaw/pitch por razões da malha, calibração de frente e guia de 5 poses
