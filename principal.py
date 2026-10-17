@@ -20,18 +20,17 @@ import time
 import traceback
 
 import cv2
-import numpy as np
 
 from banco import Banco
 from console import Console
 from embeddings import ExtratorDeEmbedding
+from janelas import JANELA_TOUCH, JANELA_TV, abrir_janelas
 from estatisticas import Configuracao, RegistroDeEventos
 from nucleo import Nucleo
 from painel import Painel
 from segundo_plano import DetectorEmSegundoPlano
 from telas import escolher_telas, listar_telas
 
-JANELA_TV, JANELA_TOUCH = "TV", "TOUCH"
 MODELOS = {
     "face_landmarker.task": "malha do rosto (MediaPipe)",
     "gesture_recognizer.task": "gestos da mão (MediaPipe)",
@@ -79,38 +78,6 @@ def conferir_arquivos():
         sys.exit(1)
 
 
-def abrir_janelas(tv, touch, em_janela, cliques):
-    """Abre as duas janelas. Primeiro cada uma aparece num tamanho normal e
-    só depois de mapeada vira tela cheia: assim o Wayfire a deixa no monitor
-    onde ela abriu (veja configurar_telas.py, que fixa isso por regras)."""
-    alvos = ((JANELA_TV, tv, (1920, 1080)), (JANELA_TOUCH, touch, (1280, 800)))
-    for nome, tela, tam in alvos:
-        cv2.namedWindow(nome, cv2.WINDOW_NORMAL)
-        if em_janela:
-            if nome == JANELA_TV:                  # metade do tamanho
-                cv2.resizeWindow(nome, tam[0] // 2, tam[1] // 2)
-            else:
-                cv2.resizeWindow(nome, *tam)
-        elif tela:
-            cv2.moveWindow(nome, tela["x"], tela["y"])
-            cv2.resizeWindow(nome, tela["largura"], tela["altura"])
-        preto = np.zeros((tam[1], tam[0], 3), np.uint8)
-        cv2.imshow(nome, preto)
-    for _ in range(12):                            # deixa as janelas abrirem
-        cv2.waitKey(50)
-    if not em_janela:
-        for nome, _, _ in alvos:
-            cv2.setWindowProperty(nome, cv2.WND_PROP_FULLSCREEN,
-                                  cv2.WINDOW_FULLSCREEN)
-        for _ in range(6):
-            cv2.waitKey(50)
-
-    def ao_clicar(evento, x, y, flags, param):
-        if evento == cv2.EVENT_LBUTTONDOWN:
-            cliques.append((x, y))
-    cv2.setMouseCallback(JANELA_TOUCH, ao_clicar)
-
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--janela", action="store_true",
@@ -118,6 +85,8 @@ def main():
     ap.add_argument("--video", help="usa um arquivo de vídeo no lugar da câmera")
     ap.add_argument("--lotacao", type=int, default=None)
     ap.add_argument("--yolo", default="yolo11n_ncnn_model")
+    ap.add_argument("--sem-ponteiro", action="store_true",
+                    help="não usa o ponteiro virtual para escolher a tela")
     args = ap.parse_args()
 
     conferir_arquivos()
@@ -154,7 +123,8 @@ def main():
     fundo = DetectorEmSegundoPlano(yolo, intervalo_min_s=0.08)   # ~12/s
 
     cliques = []
-    abrir_janelas(tv, touch, args.janela, cliques)
+    ponteiro = abrir_janelas(tv, touch, args.janela, cliques,
+                             usar_ponteiro=not args.sem_ponteiro)
     erros_seguidos, ultimo_aviso, tecla_pendente = 0, 0.0, None
     print("Rodando. Q (na tela inicial) sai.")
     try:
@@ -192,6 +162,8 @@ def main():
         pass
     finally:
         fundo.parar()
+        if ponteiro:
+            ponteiro.fechar()
         rosto.fechar()
         gestos.fechar()
         banco.fechar()
