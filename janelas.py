@@ -3,6 +3,7 @@
 Ordem (importante no Wayfire 0.7): ponteiro à esquerda -> abre o TOUCH;
 ponteiro à direita -> abre a TV; só então as duas viram tela cheia.
 """
+import os
 import re
 import subprocess
 
@@ -34,6 +35,8 @@ def _criar(nome, tela, em_janela):
 def abrir_janelas(tv, touch, em_janela, cliques, usar_ponteiro=True):
     """Devolve o Ponteiro (ou None). cliques: lista que recebe os toques
     (x, y) na janela TOUCH."""
+    # evita o aviso "QFontDatabase: Cannot find font directory" do Qt
+    os.environ.setdefault("QT_QPA_FONTDIR", "/usr/share/fonts/truetype/dejavu")
     duas_telas = tv is not None and touch is not None and tv is not touch
     ponteiro = None
     if usar_ponteiro and duas_telas:

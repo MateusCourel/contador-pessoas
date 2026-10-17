@@ -21,9 +21,13 @@ class Ponteiro:
             if fabrica is None:
                 from evdev import UInput
                 from evdev import ecodes
-                dispositivo = UInput({ecodes.EV_REL: [ecodes.REL_X,
-                                                      ecodes.REL_Y]},
-                                     name="contador-ponteiro")
+                # o libinput só trata o dispositivo como "mouse" se ele tiver
+                # também botões; sem BTN_LEFT ele é ignorado
+                dispositivo = UInput(
+                    {ecodes.EV_KEY: [ecodes.BTN_LEFT, ecodes.BTN_RIGHT],
+                     ecodes.EV_REL: [ecodes.REL_X, ecodes.REL_Y,
+                                     ecodes.REL_WHEEL]},
+                    name="contador-ponteiro")
                 self.ui, self._e = dispositivo, ecodes
             else:
                 self.ui, self._e = fabrica()
