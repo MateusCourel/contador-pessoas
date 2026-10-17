@@ -1,4 +1,5 @@
 mediapipe
 numpy
+ncnn
+pillow
 # picamera2 e opencv vêm do sistema (sudo apt install python3-picamera2 python3-opencv)
-# ultralytics (YOLO) entra na etapa de contagem

@@ -66,6 +66,11 @@ class ContadorDeEntradas:
             del self._lado[pid]
         return eventos
 
+    def mover_linha(self, ponto_a, ponto_b, inverter):
+        """Muda a linha sem contar ninguém por engano (esquece os lados)."""
+        self.a, self.b, self.inverter = ponto_a, ponto_b, inverter
+        self._lado.clear()
+
     def reiniciar(self):
         self.entraram = self.sairam = self.pico_na_camera = 0
         self._lado.clear()

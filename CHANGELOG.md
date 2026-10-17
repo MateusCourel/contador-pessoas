@@ -1,5 +1,16 @@
 # Histórico do projeto
 
+## v0.6 — Programa principal (contagem + reconhecimento + duas telas)
+- `deteccao.py` (YOLO11n em NCNN, sem PyTorch) e `rastreador.py` (IDs estáveis)
+- `nucleo.py` junta tudo; `principal.py` abre a TV e o monitor touch
+- `painel.py` (TV) e `console.py` (touch) com texto acentuado (`texto_pil.py`)
+- `fluxo.py`: cadastro como máquina de estados, com cancelamento por inatividade
+- `identidades.py`: nome só aparece depois de 2 reconhecimentos iguais (limite 0.45)
+- `estatisticas.py`: entradas por minuto, CPU/RAM/temperatura, CSV de eventos, config
+- `segundo_plano.py`: YOLO em outra linha de execução
+- `yolo_ncnn_teste.py` para conferir o YOLO antes de rodar tudo
+- `rosto.py` aceita vários rostos (`detectar_todos`)
+
 ## v0.5 — Tela touch com teclado virtual
 - `teclado.py`: teclado na tela com maiúsculas automáticas, SHIFT e acentos
 - `etapa5_cadastro_touch.py`: cadastro completo pelo toque, em tela cheia

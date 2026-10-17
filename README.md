@@ -142,6 +142,26 @@ funciona. Para os acentos aparecerem na tela é preciso ter o Pillow e a fonte
 DejaVu (`sudo apt install python3-pil fonts-dejavu-core`); sem eles o
 teclado funciona do mesmo jeito, só que sem acentos desenhados.
 
+**Etapa 6 — programa principal (contagem + reconhecimento + cadastro):**
+
+```bash
+pip install ncnn pillow           # uma vez só, com o ambiente ativo
+python yolo_ncnn_teste.py         # confere o YOLO em NCNN (cria yolo_ncnn_teste.jpg)
+python principal.py --janela      # teste em janelas
+DISPLAY=:0 python principal.py    # TV + monitor touch em tela cheia
+python principal.py --video teste.mp4   # usa um vídeo no lugar da câmera
+```
+
+Pré-requisito: a pasta `yolo11n_ncnn_model/` (criada pelo `yolo_teste.py`) e os
+três modelos das etapas anteriores na mesma pasta. A **TV** mostra o painel
+público; o **monitor touch** tem os botões (CADASTRAR, LINHA ▲▼, INVERTER
+SENTIDO, ZERAR, SAIR; zerar e sair pedem um segundo toque). A linha de contagem
+é horizontal: quem cruza para baixo na imagem conta como entrada (use INVERTER
+SENTIDO se a sua porta for o contrário). A posição da linha fica salva em
+`dados/config.json` e cada entrada/saída vai para `dados/eventos.csv` (só
+hora, evento e número temporário, sem dados pessoais). Nomes só aparecem na TV
+para quem se cadastrou; os demais são "Pessoa · ID n".
+
 ### Usando o Thonny
 
 Em **Ferramentas → Opções → Interpretador → Alternative Python 3 executable**,
@@ -200,7 +220,7 @@ mostra `(contador)` no começo da linha quando está ativo).
 - [x] 3. Detectar rosto e direção da cabeça (pose guiada)
 - [x] 4. Cadastro com embeddings + SQLite
 - [x] 5. Tela touch com teclado virtual
-- [ ] 6. Contagem de pessoas (YOLO) e reconhecimento de quem passa
+- [x] 6. Contagem de pessoas (YOLO) e reconhecimento de quem passa (programa principal, TV + touch)
 - [ ] 7. Painel web, mapa de calor e alertas
 - [ ] 8. Medir a taxa de acerto e melhorar o reconhecimento
 

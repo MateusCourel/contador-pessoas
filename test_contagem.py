@@ -96,6 +96,12 @@ class TesteContagem(unittest.TestCase):
         self.c.reiniciar()
         self.assertEqual((self.c.entraram, self.c.pico_na_camera), (0, 0))
 
+    def test_mover_linha_nao_conta_ninguem(self):
+        self.c.atualizar({1: (0.5, 0.2)})
+        self.c.mover_linha((0.0, 0.1), (1.0, 0.1), False)   # sobe a linha
+        self.c.atualizar({1: (0.5, 0.2)})                   # agora "abaixo"
+        self.assertEqual((self.c.entraram, self.c.sairam), (0, 0))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -90,7 +90,7 @@ class Painel:
         self._rotulos = {}
 
     # ---------- parte estática (re-desenhada no máximo 1x por segundo) ----
-    def _desenhar_estatico(self, dados, modo):
+    def _desenhar_estatico(self, dados, modo, cadastro=None):
         img = Image.new("RGB", (LARG, ALT), FUNDO)
         d = ImageDraw.Draw(img)
         f = self._f
@@ -150,7 +150,7 @@ class Painel:
                    anchor="mm")
 
         # faixa de convite (palma da mão)
-        self._desenhar_convite(d, modo)
+        self._desenhar_convite(d, modo, cadastro)
 
         # barra de desempenho
         d.rounded_rectangle((30, 1005, 1890, 1065), radius=18, fill=CARTAO,
@@ -177,7 +177,16 @@ class Painel:
             x += int(larg_nome + 14 + d.textlength(valor, font=f["chip"])) + 70
         return np.asarray(img)[:, :, ::-1].copy()          # RGB -> BGR
 
-    def _desenhar_convite(self, d, modo):
+    def _ajustar(self, d, texto, largura_max, tamanho, negrito=True):
+        """Fonte do tamanho pedido, diminuída até o texto caber."""
+        while tamanho > 22:
+            fonte = _fonte(tamanho, negrito)
+            if d.textlength(texto, font=fonte) <= largura_max:
+                return fonte
+            tamanho -= 4
+        return _fonte(22, negrito)
+
+    def _desenhar_convite(self, d, modo, cadastro=None):
         f = self._f
         caixa = (30, 835, 1290, 985)
         d.rounded_rectangle(caixa, radius=26, fill=CARTAO, outline=CIANO if
@@ -189,10 +198,16 @@ class Painel:
             d.text((270, 945), "e mostre para a câmera para se cadastrar",
                    font=f["banner2"], fill=SUAVE, anchor="lm")
         elif modo == "cadastro":
-            d.text((660, 910), "CADASTRO EM ANDAMENTO", font=f["banner"],
-                   fill=AMARELO, anchor="mm")
-            d.text((660, 960), "siga as instruções da tela",
-                   font=f["banner2"], fill=SUAVE, anchor="mm")
+            titulo, sub = cadastro or ("CADASTRO EM ANDAMENTO",
+                                       "siga as instruções da tela")
+            d.rounded_rectangle(caixa, radius=26, fill=CARTAO,
+                                outline=AMARELO, width=3)
+            d.text((660, 888), titulo,
+                   font=self._ajustar(d, titulo, 1180, 62), fill=AMARELO,
+                   anchor="mm")
+            d.text((660, 938), sub,
+                   font=self._ajustar(d, sub, 1180, 32, False), fill=TEXTO,
+                   anchor="mm")
         else:
             desenhar_palma(d, 150, 909, 100, BORDA)
             d.text((270, 880), "APROXIME-SE DA CÂMERA", font=f["banner"],
@@ -218,16 +233,18 @@ class Painel:
 
     # ---------- montagem de cada quadro ----------
     def compor(self, camera_bgr, dados, pessoas=(), modo="ocioso", t=0.0,
-               linha=None):
+               linha=None, cadastro=None, barra=None):
         """camera_bgr: quadro da câmera. pessoas: lista de dicts com
         'caixa' (x0,y0,x1,y1 normalizados), 'rotulo', 'cor' (RGB),
         e opcionalmente 'pontos' (malha do rosto, normalizada).
-        linha: ((x,y),(x,y)) da linha de contagem. t: segundos (animação)."""
-        chave = (modo, tuple(sorted((k, round(v, 1) if isinstance(v, float)
+        linha: ((x,y),(x,y)) da linha de contagem. t: segundos (animação).
+        cadastro: (título, subtítulo) mostrados na faixa durante o cadastro.
+        barra: progresso 0-1 desenhado na faixa (None = sem barra)."""
+        chave = (modo, tuple(cadastro or ()), tuple(sorted((k, round(v, 1) if isinstance(v, float)
                                      else tuple(v) if isinstance(v, list)
                                      else v) for k, v in dados.items())))
         if chave != self._chave:
-            self._estatico = self._desenhar_estatico(dados, modo)
+            self._estatico = self._desenhar_estatico(dados, modo, cadastro)
             self._chave = chave
         quadro = self._estatico.copy()
 
@@ -241,6 +258,13 @@ class Painel:
         for pessoa in pessoas:
             self._marcar(cam, pessoa)
         quadro[CAM_Y:CAM_Y + CAM_H, CAM_X:CAM_X + CAM_W] = cam
+
+        if barra is not None and modo == "cadastro":
+            x0, x1, y = 60, 1260, 964
+            cv2.rectangle(quadro, (x0, y), (x1, y + 12), (82, 52, 38), -1)
+            cv2.rectangle(quadro, (x0, y),
+                          (x0 + int((x1 - x0) * min(max(barra, 0), 1)), y + 12),
+                          (36, 191, 251), -1)
 
         if modo == "convite":        # contorno que pulsa para chamar atenção
             espessura = 3 + int(3 * (0.5 + 0.5 * np.sin(t * 5)))
