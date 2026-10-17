@@ -53,6 +53,18 @@ class Ponteiro:
         time.sleep(0.25)
         return True
 
+    def clicar(self):
+        """Um clique esquerdo onde o ponteiro está (fixa o monitor ativo)."""
+        if not self.ui:
+            return False
+        self.ui.write(self._e.EV_KEY, self._e.BTN_LEFT, 1)
+        self.ui.syn()
+        time.sleep(0.06)
+        self.ui.write(self._e.EV_KEY, self._e.BTN_LEFT, 0)
+        self.ui.syn()
+        time.sleep(0.25)
+        return True
+
     def ir_para_direita(self):
         """Encosta o ponteiro na borda direita (a TV)."""
         return self._empurrar(+1)

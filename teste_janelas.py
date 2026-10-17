@@ -4,7 +4,7 @@ Mostra uma tela azul "TV" na TV e uma verde "TOUCH" no monitor de 8", em
 tela cheia, e diz onde cada janela caiu. Toque (ou clique) para ver o ponto.
 
 Rodar:  DISPLAY=:0 python teste_janelas.py          Sair: Q
-        DISPLAY=:0 python teste_janelas.py --sem-ponteiro   (compara)
+        Variações para investigar: --sem-ponteiro, --sem-clique, --mover
 """
 import sys
 import time
@@ -23,7 +23,9 @@ def main():
     tv, touch = escolher_telas(listar_telas())
     cliques = []
     ponteiro = abrir_janelas(tv, touch, False, cliques,
-                             usar_ponteiro="--sem-ponteiro" not in sys.argv)
+                             usar_ponteiro="--sem-ponteiro" not in sys.argv,
+                             mover="--mover" in sys.argv,
+                             clicar="--sem-clique" not in sys.argv, log=print)
     time.sleep(0.5)
     onde = onde_estao_as_janelas()
     for nome in (JANELA_TV, JANELA_TOUCH):

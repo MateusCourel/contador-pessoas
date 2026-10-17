@@ -24,6 +24,7 @@ class Falso:
 
 class Ecodes:
     EV_REL, REL_X, REL_Y = 2, 0, 1
+    EV_KEY, BTN_LEFT = 1, 272
 
 
 class TestePonteiro(unittest.TestCase):
@@ -42,6 +43,11 @@ class TestePonteiro(unittest.TestCase):
         p.ir_para_esquerda()
         self.assertLess(sum(v for _, _, v in ui.eventos), -3200)
         self.assertTrue(all(c == Ecodes.REL_X for _, c, _ in ui.eventos))
+
+    def test_clique(self):
+        p, ui = self.novo()
+        self.assertTrue(p.clicar())
+        self.assertEqual(ui.eventos, [(1, 272, 1), (1, 272, 0)])
 
     def test_fechar(self):
         p, ui = self.novo()

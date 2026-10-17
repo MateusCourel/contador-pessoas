@@ -16,7 +16,7 @@ JANELA_TV, JANELA_TOUCH = "TV", "TOUCH"
 TAMANHOS = {JANELA_TV: (1920, 1080), JANELA_TOUCH: (1280, 800)}
 
 
-def _criar(nome, tela, em_janela):
+def _criar(nome, tela, em_janela, mover):
     cv2.namedWindow(nome, cv2.WINDOW_NORMAL)
     larg, alt = TAMANHOS[nome]
     if em_janela:
@@ -24,7 +24,7 @@ def _criar(nome, tela, em_janela):
             cv2.resizeWindow(nome, larg // 2, alt // 2)
         else:
             cv2.resizeWindow(nome, larg, alt)
-    elif tela:
+    elif tela and mover:
         cv2.moveWindow(nome, tela["x"], tela["y"])
         cv2.resizeWindow(nome, tela["largura"], tela["altura"])
     cv2.imshow(nome, np.zeros((alt, larg, 3), np.uint8))
@@ -32,9 +32,22 @@ def _criar(nome, tela, em_janela):
         cv2.waitKey(50)
 
 
-def abrir_janelas(tv, touch, em_janela, cliques, usar_ponteiro=True):
+def _relatar(etapa, log):
+    """Mostra onde as janelas estão agora (precisa do xwininfo)."""
+    if log is None:
+        return
+    onde = onde_estao_as_janelas()
+    partes = [f"{n}: {w}x{h}+{x}+{y}" for n, (w, h, x, y) in onde.items()]
+    log(f"[janelas] {etapa}: " + ("  ".join(partes) or "(não achei)"))
+
+
+def abrir_janelas(tv, touch, em_janela, cliques, usar_ponteiro=True,
+                  mover=False, clicar=True, log=None):
     """Devolve o Ponteiro (ou None). cliques: lista que recebe os toques
-    (x, y) na janela TOUCH."""
+    (x, y) na janela TOUCH. mover: pede ao sistema a posição das janelas (o
+    Wayfire costuma ignorar ou interpretar errado; por padrão não pede).
+    clicar: dá um clique na TV antes de abrir a janela dela, para o Wayfire
+    considerar aquele monitor o ativo. log: função para relatar o caminho."""
     # evita o aviso "QFontDatabase: Cannot find font directory" do Qt
     os.environ.setdefault("QT_QPA_FONTDIR", "/usr/share/fonts/truetype/dejavu")
     duas_telas = tv is not None and touch is not None and tv is not touch
@@ -48,10 +61,14 @@ def abrir_janelas(tv, touch, em_janela, cliques, usar_ponteiro=True):
 
     if ponteiro:
         ponteiro.ir_para_esquerda()
-    _criar(JANELA_TOUCH, touch, em_janela)
+    _criar(JANELA_TOUCH, touch, em_janela, mover)
+    _relatar("TOUCH criada", log)
     if ponteiro:
         ponteiro.ir_para_direita()
-    _criar(JANELA_TV, tv, em_janela)
+        if clicar:
+            ponteiro.clicar()
+    _criar(JANELA_TV, tv, em_janela, mover)
+    _relatar("TV criada", log)
 
     if not em_janela:
         for nome in (JANELA_TOUCH, JANELA_TV):
@@ -59,6 +76,7 @@ def abrir_janelas(tv, touch, em_janela, cliques, usar_ponteiro=True):
                                   cv2.WINDOW_FULLSCREEN)
         for _ in range(8):
             cv2.waitKey(50)
+        _relatar("tela cheia", log)
 
     def ao_clicar(evento, x, y, flags, param):
         if evento == cv2.EVENT_LBUTTONDOWN:

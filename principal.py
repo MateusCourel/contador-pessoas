@@ -124,7 +124,8 @@ def main():
 
     cliques = []
     ponteiro = abrir_janelas(tv, touch, args.janela, cliques,
-                             usar_ponteiro=not args.sem_ponteiro)
+                             usar_ponteiro=not args.sem_ponteiro,
+                             log=print)
     erros_seguidos, ultimo_aviso, tecla_pendente = 0, 0.0, None
     print("Rodando. Q (na tela inicial) sai.")
     try:
