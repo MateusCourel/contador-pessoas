@@ -48,12 +48,17 @@ def _abrir_uma(nome, tela, lado, ponteiro, em_janela, mover, clicar, log,
     ela caiu e, se errou o monitor, fecha e tenta de novo."""
     for tentativa in range(1, tentativas + 1):
         if ponteiro:
-            if lado == "direita":
+            # o Wayfire só passa a considerar um monitor "o ativo" depois de
+            # um clique nele; por isso clicamos no fundo de tela do monitor
+            # onde a janela deve abrir
+            ponteiro.ir_para_o_alto()      # (se estiver na TV, abaixo da
+            if lado == "direita":          # altura do touch, não cruzaria)
                 ponteiro.ir_para_direita()
-                if clicar:
-                    ponteiro.clicar()
             else:
                 ponteiro.ir_para_esquerda()
+            ponteiro.descer_um_pouco()
+            if clicar:
+                ponteiro.clicar()
         _criar(nome, tela, em_janela, mover)
         if em_janela:
             return True
@@ -69,9 +74,10 @@ def _abrir_uma(nome, tela, lado, ponteiro, em_janela, mover, clicar, log,
                 + ("  ".join(partes) or "(sem xwininfo)"))
         if posicao_confere(onde, nome, tela) or not ponteiro:
             return True
-        cv2.destroyWindow(nome)                    # errou o monitor: de novo
-        for _ in range(6):
-            cv2.waitKey(50)
+        if tentativa < tentativas:                 # errou o monitor: de novo
+            cv2.destroyWindow(nome)
+            for _ in range(6):
+                cv2.waitKey(50)
     return False
 
 
@@ -105,7 +111,10 @@ def abrir_janelas(tv, touch, em_janela, cliques, usar_ponteiro=True,
     def ao_clicar(evento, x, y, flags, param):
         if evento == cv2.EVENT_LBUTTONDOWN:
             cliques.append((x, y))
-    cv2.setMouseCallback(JANELA_TOUCH, ao_clicar)
+    try:
+        cv2.setMouseCallback(JANELA_TOUCH, ao_clicar)
+    except cv2.error as erro:
+        print(f"[janelas] sem toque na janela TOUCH: {erro}")
     return ponteiro
 
 

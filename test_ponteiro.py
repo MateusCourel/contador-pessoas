@@ -44,6 +44,16 @@ class TestePonteiro(unittest.TestCase):
         self.assertLess(sum(v for _, _, v in ui.eventos), -3200)
         self.assertTrue(all(c == Ecodes.REL_X for _, c, _ in ui.eventos))
 
+    def test_alto_e_descer_usam_o_eixo_y(self):
+        p, ui = self.novo()
+        p.ir_para_o_alto()
+        self.assertLess(sum(v for _, c, v in ui.eventos if c == Ecodes.REL_Y),
+                        -3200)
+        ui.eventos.clear()
+        p.descer_um_pouco()
+        total = sum(v for _, c, v in ui.eventos if c == Ecodes.REL_Y)
+        self.assertTrue(0 < total < 800)       # desce, mas não até o fim
+
     def test_clique(self):
         p, ui = self.novo()
         self.assertTrue(p.clicar())

@@ -43,15 +43,28 @@ class Ponteiro:
     def disponivel(self):
         return self.ui is not None
 
-    def _empurrar(self, sinal_x, passos=70, passo=120, pausa_s=0.003):
+    def _mexer(self, eixo, sinal, passos, passo, pausa_s=0.003):
         if not self.ui:
             return False
+        codigo = self._e.REL_X if eixo == "x" else self._e.REL_Y
         for _ in range(passos):
-            self.ui.write(self._e.EV_REL, self._e.REL_X, sinal_x * passo)
+            self.ui.write(self._e.EV_REL, codigo, sinal * passo)
             self.ui.syn()
             time.sleep(pausa_s)
         time.sleep(0.25)
         return True
+
+    def _empurrar(self, sinal_x, passos=70, passo=120):
+        return self._mexer("x", sinal_x, passos, passo)
+
+    def ir_para_o_alto(self):
+        """Encosta o ponteiro na borda de cima (y = 0), em qualquer tela."""
+        return self._mexer("y", -1, 70, 120)
+
+    def descer_um_pouco(self):
+        """Desce o ponteiro devagar (algumas centenas de pixels), para sair
+        da barra de tarefas e ficar sobre o fundo de tela."""
+        return self._mexer("y", +1, 40, 8, pausa_s=0.01)
 
     def clicar(self):
         """Um clique esquerdo onde o ponteiro está (fixa o monitor ativo)."""
