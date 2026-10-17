@@ -87,6 +87,7 @@ class Painel:
         self._f["fino"] = _fonte(28, negrito=False)
         self._chave = None
         self._estatico = None
+        self._buf = None
         self._rotulos = {}
 
     # ---------- parte estática (re-desenhada no máximo 1x por segundo) ----
@@ -246,10 +247,13 @@ class Painel:
         if chave != self._chave:
             self._estatico = self._desenhar_estatico(dados, modo, cadastro)
             self._chave = chave
-        quadro = self._estatico.copy()
+        if self._buf is None or self._buf.shape != self._estatico.shape:
+            self._buf = np.empty_like(self._estatico)
+        np.copyto(self._buf, self._estatico)
+        quadro = self._buf
 
         cam = cv2.resize(camera_bgr, (CAM_W, CAM_H),
-                         interpolation=cv2.INTER_AREA)
+                         interpolation=cv2.INTER_LINEAR)
         if linha:
             (ax, ay), (bx, by) = linha
             p, q = (int(ax * CAM_W), int(ay * CAM_H)), \

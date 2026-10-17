@@ -117,7 +117,7 @@ def main():
     from rosto import DetectorDeRosto
 
     try:
-        yolo = DetectorDePessoas(args.yolo)
+        yolo = DetectorDePessoas(args.yolo, threads=3)
     except FileNotFoundError as erro:
         print(erro)
         sys.exit(1)
@@ -139,7 +139,7 @@ def main():
     nucleo = Nucleo(banco, extrator.extrair, rosto, gestos, Painel(),
                     Console(), Configuracao(), RegistroDeEventos(),
                     lotacao_max=args.lotacao)
-    fundo = DetectorEmSegundoPlano(yolo)
+    fundo = DetectorEmSegundoPlano(yolo, intervalo_min_s=0.08)   # ~12/s
 
     cliques = []
     abrir_janelas(tv, touch, args.janela, cliques)

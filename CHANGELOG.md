@@ -1,5 +1,12 @@
 # Histórico do projeto
 
+## v0.6.1 — Desempenho e tela touch refinada
+- YOLO limitado a ~12 detecções por segundo (antes rodava sem parar e ocupava todos os núcleos)
+- Rosto e gesto só de vez em quando no dia a dia; a malha do rosto só aparece no cadastro
+- Painel sem alocar 6 MB por quadro; caixas acompanham o movimento entre detecções
+- Tela touch redesenhada (cantos arredondados, texto suave, prévia maior) com a parte fixa em cache
+- A linha de contagem e a seta ENTRADA só aparecem no touch por 4 s ao ajustar a linha
+
 ## v0.6 — Programa principal (contagem + reconhecimento + duas telas)
 - `deteccao.py` (YOLO11n em NCNN, sem PyTorch) e `rastreador.py` (IDs estáveis)
 - `nucleo.py` junta tudo; `principal.py` abre a TV e o monitor touch

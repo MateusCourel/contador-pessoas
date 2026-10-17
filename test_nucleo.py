@@ -180,6 +180,22 @@ class TesteNucleo(unittest.TestCase):
         self.passo(None, tecla=ord("q"))
         self.assertTrue(self.nucleo.sair)
 
+    def test_linha_so_aparece_ao_ajustar(self):
+        self.rosto.malhas = []
+        self.passo(None)
+        self.assertEqual(self.nucleo._guia_ate < self.t, True)
+        self.passo(None, toque=centro(con.B_LINHA_CIMA))
+        self.assertGreater(self.nucleo._guia_ate, self.t)
+
+    def test_console_usa_cache_da_parte_fixa(self):
+        c = self.nucleo.console
+        self.passo(None)
+        antes = c._cache_img
+        self.passo(None)
+        self.t += 1
+        self.passo(None)
+        self.assertIs(c._cache_img, antes)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

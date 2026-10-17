@@ -14,8 +14,13 @@ import traceback
 
 
 class DetectorEmSegundoPlano:
-    def __init__(self, detector):
+    def __init__(self, detector, intervalo_min_s=0.0):
+        """intervalo_min_s: tempo mínimo entre duas detecções. Rodar o YOLO
+        'o mais rápido possível' ocupa todos os núcleos do Pi e trava o
+        resto do programa; ~12 por segundo bastam para contar."""
         self._detector = detector
+        self.intervalo_min_s = intervalo_min_s
+        self._ultimo_envio = -1e9
         self._trava = threading.Lock()
         self._evento = threading.Event()
         self._frame = None
@@ -30,8 +35,11 @@ class DetectorEmSegundoPlano:
     def enviar(self, frame, agora):
         """Entrega um quadro (copiado). Devolve False se estava ocupado."""
         with self._trava:
-            if self._ocupado:
+            agora_rel = time.monotonic()
+            if self._ocupado or \
+                    agora_rel - self._ultimo_envio < self.intervalo_min_s:
                 return False
+            self._ultimo_envio = agora_rel
             self._frame = frame.copy()
             self._agora = agora
             self._ocupado = True

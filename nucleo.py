@@ -23,7 +23,11 @@ PASSO_DA_LINHA = 0.02
 COR_CONHECIDO = (52, 211, 153)       # verde
 COR_DESCONHECIDO = (34, 211, 238)    # ciano
 COR_CADASTRANDO = (251, 191, 36)     # amarelo
-INTERVALO_TOUCH_S = 0.12             # a tela touch muda pouco: ~8 quadros/s
+INTERVALO_TOUCH_S = 0.10             # a tela touch muda pouco: ~10 quadros/s
+INTERVALO_ROSTO_S = 0.15             # rosto no dia a dia: ~6 vezes por segundo
+INTERVALO_GESTO_S = 0.15             # gesto da mão: idem (o gatilho perdoa 0.25 s)
+GUIA_LINHA_S = 4.0                   # linha visível no touch após mexer nela
+LINHA_NA_TV = True                   # False = esconde a linha amarela da TV
 
 
 def _caixa_da_malha(pontos):
@@ -59,7 +63,9 @@ class Nucleo:
 
         self._pistas = []
         self._pid_cadastro = None
-        self._contagem_quadros = 0
+        self._ultimo_rosto_t = -1e9
+        self._ultimo_gesto_t = -1e9
+        self._guia_ate = -1e9
         self._ultimo_agora = None
         self._inicio = None
         self._sistema = {}
@@ -93,12 +99,15 @@ class Nucleo:
         elif acao == "linha_cima":
             self.linha_y = max(0.1, self.linha_y - PASSO_DA_LINHA)
             self._aplicar_linha()
+            self._guia_ate = agora + GUIA_LINHA_S
         elif acao == "linha_baixo":
             self.linha_y = min(0.9, self.linha_y + PASSO_DA_LINHA)
             self._aplicar_linha()
+            self._guia_ate = agora + GUIA_LINHA_S
         elif acao == "inverter":
             self.inverter = not self.inverter
             self._aplicar_linha()
+            self._guia_ate = agora + GUIA_LINHA_S
         elif acao == "zerar":
             self.contador.reiniciar()
             self.historico.reiniciar()
@@ -129,9 +138,15 @@ class Nucleo:
             self._pistas = self.rastreador.atualizar(deteccoes, agora)
         visiveis = [p for p in self._pistas if p.visivel]
 
-        # 2) rostos (pula se não há ninguém e nada em andamento)
+        # 2) rostos: no cadastro a cada quadro; no dia a dia só de vez em
+        # quando e só se alguém ainda precisa ser reconhecido (economiza CPU)
         rostos = []
-        if visiveis or self.fluxo.ativo:
+        if self.fluxo.ativo:
+            rostos = self.rosto.detectar_todos(frame)
+        elif agora - self._ultimo_rosto_t >= INTERVALO_ROSTO_S and any(
+                self.identidades.precisa_tentar(p.id, agora)
+                for p in visiveis):
+            self._ultimo_rosto_t = agora
             rostos = self.rosto.detectar_todos(frame)
         caixas = {p.id: p.caixa for p in visiveis}
         rosto_de = associar_rostos(rostos, caixas)
@@ -166,13 +181,13 @@ class Nucleo:
         self._tratar_tecla(tecla, agora)
 
         if self.fluxo.estado == ESPERA and self.gestos is not None and \
-                (visiveis or rostos) and self._contagem_quadros % 2 == 0:
+                visiveis and agora - self._ultimo_gesto_t >= INTERVALO_GESTO_S:
+            self._ultimo_gesto_t = agora
             res = self.gestos.detectar(frame)
             gesto = res[0] if res else None
             _, disparou = self.gatilho.update(gesto == GESTO_MAO_ABERTA, agora)
             if disparou:
                 self.fluxo.iniciar(agora)
-        self._contagem_quadros += 1
 
         rosto_cadastro, pid_cadastro = None, None
         if self.fluxo.ativo and rostos:
@@ -189,7 +204,7 @@ class Nucleo:
 
         # 6) o que mostrar
         pessoas = self._pessoas_para_mostrar(visiveis, rosto_de,
-                                             rosto_cadastro)
+                                             rosto_cadastro, agora)
         dados = self._dados(agora, len(visiveis))
         if self.fluxo.ativo:
             modo = "cadastro"
@@ -198,12 +213,13 @@ class Nucleo:
             barra = (self.fluxo.progresso
                      if self.fluxo.estado in (CALIBRAR, POSES_) else None)
         else:
-            modo = "convite" if (visiveis or rostos) else "ocioso"
+            modo = "convite" if visiveis else "ocioso"
             cadastro, barra = None, None
 
         a, b = self._linha()
         tv = self.painel.compor(frame, dados, pessoas, modo=modo,
-                                t=agora - self._inicio, linha=(a, b),
+                                t=agora - self._inicio,
+                                linha=(a, b) if LINHA_NA_TV else None,
                                 cadastro=cadastro, barra=barra)
 
         tocou = toque is not None or tecla not in (None, -1, 255)
@@ -222,12 +238,14 @@ class Nucleo:
                 "pose_atual": self.fluxo.pose_atual,
             }
             self._img_touch = self.console.desenhar(
-                vm, agora, teclado=self.fluxo.teclado)
+                vm, agora, teclado=self.fluxo.teclado,
+                mostrar_linha=agora < self._guia_ate)
             self._touch_ate = agora + INTERVALO_TOUCH_S
         return tv, self._img_touch
 
     # ---------- partes ----------
-    def _pessoas_para_mostrar(self, visiveis, rosto_de, rosto_cadastro):
+    def _pessoas_para_mostrar(self, visiveis, rosto_de, rosto_cadastro,
+                              agora):
         pessoas = []
         for p in visiveis:
             pontos = rosto_de.get(p.id)
@@ -239,8 +257,14 @@ class Nucleo:
                 rotulo = self.identidades.rotulo(p.id)
                 cor = (COR_CONHECIDO if self.identidades.conhecido(p.id)
                        else COR_DESCONHECIDO)
-            pessoas.append({"caixa": p.caixa, "rotulo": rotulo, "cor": cor,
-                            "pontos": pontos or ()})
+            # entre uma detecção e outra (o YOLO roda ~12x por segundo), a
+            # caixa continua andando com a velocidade da pessoa
+            dt = min(max(agora - p.ultima_vez, 0.0), 0.12)
+            dx, dy = p.vel[0] * dt, p.vel[1] * dt
+            x0, y0, x1, y1 = p.caixa
+            caixa = (x0 + dx, y0 + dy, x1 + dx, y1 + dy)
+            pessoas.append({"caixa": caixa, "rotulo": rotulo, "cor": cor,
+                            "pontos": pontos if cadastrando else ()})
         if rosto_cadastro is not None and not any(
                 pt is rosto_cadastro for pt in rosto_de.values()):
             pessoas.append({"caixa": _caixa_da_malha(rosto_cadastro),

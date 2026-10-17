@@ -65,6 +65,15 @@ class TesteSegundoPlano(unittest.TestCase):
         self.assertTrue(ts.enviar(FRAME, 2.0))   # continua aceitando
         ts.parar()
 
+    def test_respeita_o_intervalo_minimo(self):
+        ts = DetectorEmSegundoPlano(Lento(0.0), intervalo_min_s=0.3)
+        self.assertTrue(ts.enviar(FRAME, 1.0))
+        esperar(ts)
+        self.assertFalse(ts.enviar(FRAME, 2.0))     # cedo demais
+        time.sleep(0.35)
+        self.assertTrue(ts.enviar(FRAME, 3.0))
+        ts.parar()
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
