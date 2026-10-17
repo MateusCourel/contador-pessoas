@@ -49,18 +49,19 @@ def conectores(drm=DRM):
 
 
 def regras(tv, touch, nome_tv, nome_touch):
-    """Linhas [window-rules] para as duas janelas. tv/touch: dicts de telas.py
-    (x, y, largura, altura); nome_*: conector (ex. 'HDMI-A-2') ou None."""
-    def uma(chave, titulo, tela, conector):
-        linhas = [f'{chave}_pos = on created if title is "{titulo}" then '
-                  f'set geometry {tela["x"]} {tela["y"]} '
-                  f'{tela["largura"]} {tela["altura"]}']
-        if conector:
-            linhas.append(f'{chave}_saida = on created if title is '
-                          f'"{titulo}" then start_on_output "{conector}"')
-        return linhas
-    return uma("tv", "TV", tv, nome_tv) + \
-        uma("touch", "TOUCH", touch, nome_touch)
+    """Linhas [window-rules]: cada janela abre no monitor certo.
+
+    Só usamos start_on_output (pelo nome do conector). A regra "set geometry"
+    NÃO serve aqui: no Wayfire a geometria é relativa ao monitor da janela,
+    então "1280 0" jogaria a janela da TV para fora da tela."""
+    linhas = []
+    if nome_tv:
+        linhas.append(f'tv_saida = on created if title is "TV" then '
+                      f'start_on_output "{nome_tv}"')
+    if nome_touch:
+        linhas.append(f'touch_saida = on created if title is "TOUCH" then '
+                      f'start_on_output "{nome_touch}"')
+    return linhas
 
 
 def ajustar(texto, linhas_de_regra):
