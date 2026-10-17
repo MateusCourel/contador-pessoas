@@ -4,7 +4,7 @@ Rodar:  python test_ponteiro.py
 """
 import unittest
 
-from janelas import interpretar_xwininfo
+from janelas import interpretar_xwininfo, posicao_confere
 from ponteiro import Ponteiro
 
 
@@ -73,6 +73,20 @@ class TesteXwininfo(unittest.TestCase):
         self.assertEqual(interpretar_xwininfo(texto),
                          {"TOUCH": (1280, 800, 0, 34),
                           "TV": (1920, 1080, 1280, 0)})
+
+
+class TestePosicao(unittest.TestCase):
+    TV = {"x": 1280, "y": 0}
+
+    def test_confere(self):
+        self.assertTrue(posicao_confere({"TV": (1920, 1080, 1280, 0)}, "TV", self.TV))
+
+    def test_errou_o_monitor(self):
+        self.assertFalse(posicao_confere({"TV": (1280, 800, 0, 0)}, "TV", self.TV))
+
+    def test_sem_informacao_conta_como_certo(self):
+        self.assertTrue(posicao_confere({}, "TV", self.TV))
+        self.assertTrue(posicao_confere({"TOUCH": (1, 1, 0, 0)}, "TV", self.TV))
 
 
 if __name__ == "__main__":

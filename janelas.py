@@ -32,22 +32,56 @@ def _criar(nome, tela, em_janela, mover):
         cv2.waitKey(50)
 
 
-def _relatar(etapa, log):
-    """Mostra onde as janelas estão agora (precisa do xwininfo)."""
-    if log is None:
-        return
-    onde = onde_estao_as_janelas()
-    partes = [f"{n}: {w}x{h}+{x}+{y}" for n, (w, h, x, y) in onde.items()]
-    log(f"[janelas] {etapa}: " + ("  ".join(partes) or "(não achei)"))
+def posicao_confere(onde, nome, tela):
+    """True se a janela `nome` (dict do xwininfo) está no canto da `tela`.
+    Sem informação (xwininfo ausente) conta como certo."""
+    if not onde or nome not in onde or tela is None:
+        return True
+    _, _, x, y = onde[nome]
+    return (x, y) == (tela["x"], tela["y"])
+
+
+def _abrir_uma(nome, tela, lado, ponteiro, em_janela, mover, clicar, log,
+               tentativas=3):
+    """Abre uma janela no monitor `tela`, empurrando o ponteiro para o
+    `lado` ('esquerda' = touch, 'direita' = TV). Em tela cheia confere onde
+    ela caiu e, se errou o monitor, fecha e tenta de novo."""
+    for tentativa in range(1, tentativas + 1):
+        if ponteiro:
+            if lado == "direita":
+                ponteiro.ir_para_direita()
+                if clicar:
+                    ponteiro.clicar()
+            else:
+                ponteiro.ir_para_esquerda()
+        _criar(nome, tela, em_janela, mover)
+        if em_janela:
+            return True
+        cv2.setWindowProperty(nome, cv2.WND_PROP_FULLSCREEN,
+                              cv2.WINDOW_FULLSCREEN)
+        for _ in range(8):
+            cv2.waitKey(50)
+        onde = onde_estao_as_janelas()
+        if log:
+            partes = [f"{n}: {w}x{h}+{x}+{y}"
+                      for n, (w, h, x, y) in onde.items()]
+            log(f"[janelas] {nome} tentativa {tentativa}: "
+                + ("  ".join(partes) or "(sem xwininfo)"))
+        if posicao_confere(onde, nome, tela) or not ponteiro:
+            return True
+        cv2.destroyWindow(nome)                    # errou o monitor: de novo
+        for _ in range(6):
+            cv2.waitKey(50)
+    return False
 
 
 def abrir_janelas(tv, touch, em_janela, cliques, usar_ponteiro=True,
                   mover=False, clicar=True, log=None):
-    """Devolve o Ponteiro (ou None). cliques: lista que recebe os toques
-    (x, y) na janela TOUCH. mover: pede ao sistema a posição das janelas (o
-    Wayfire costuma ignorar ou interpretar errado; por padrão não pede).
-    clicar: dá um clique na TV antes de abrir a janela dela, para o Wayfire
-    considerar aquele monitor o ativo. log: função para relatar o caminho."""
+    """Abre TOUCH e TV, cada uma no seu monitor. Devolve o Ponteiro (ou
+    None). cliques: lista que recebe os toques (x, y) na janela TOUCH.
+    mover: pede a posição ao sistema (o Wayfire costuma ignorar; por padrão
+    não pede). clicar: clique na TV antes de abrir a janela dela. log: função
+    para relatar o caminho (ex.: print)."""
     # evita o aviso "QFontDatabase: Cannot find font directory" do Qt
     os.environ.setdefault("QT_QPA_FONTDIR", "/usr/share/fonts/truetype/dejavu")
     duas_telas = tv is not None and touch is not None and tv is not touch
@@ -56,27 +90,17 @@ def abrir_janelas(tv, touch, em_janela, cliques, usar_ponteiro=True,
         ponteiro = Ponteiro()
         if not ponteiro.disponivel:
             print(f"[janelas] ponteiro virtual indisponível: {ponteiro.erro}")
-            print("[janelas] as janelas podem abrir na mesma tela.")
+            print("[janelas] (rode: sudo chmod 666 /dev/uinput) — as janelas "
+                  "podem abrir na mesma tela.")
             ponteiro = None
 
-    if ponteiro:
-        ponteiro.ir_para_esquerda()
-    _criar(JANELA_TOUCH, touch, em_janela, mover)
-    _relatar("TOUCH criada", log)
-    if ponteiro:
-        ponteiro.ir_para_direita()
-        if clicar:
-            ponteiro.clicar()
-    _criar(JANELA_TV, tv, em_janela, mover)
-    _relatar("TV criada", log)
-
-    if not em_janela:
-        for nome in (JANELA_TOUCH, JANELA_TV):
-            cv2.setWindowProperty(nome, cv2.WND_PROP_FULLSCREEN,
-                                  cv2.WINDOW_FULLSCREEN)
-        for _ in range(8):
-            cv2.waitKey(50)
-        _relatar("tela cheia", log)
+    ok_touch = _abrir_uma(JANELA_TOUCH, touch, "esquerda", ponteiro,
+                          em_janela, mover, clicar, log)
+    ok_tv = _abrir_uma(JANELA_TV, tv, "direita", ponteiro, em_janela, mover,
+                       clicar, log)
+    if not (ok_touch and ok_tv):
+        print("[janelas] não consegui deixar cada janela no seu monitor; "
+              "rode teste_janelas.py e me mande o resultado.")
 
     def ao_clicar(evento, x, y, flags, param):
         if evento == cv2.EVENT_LBUTTONDOWN:
