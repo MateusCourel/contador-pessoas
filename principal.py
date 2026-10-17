@@ -20,6 +20,7 @@ import time
 import traceback
 
 import cv2
+import numpy as np
 
 from banco import Banco
 from console import Console
@@ -79,8 +80,11 @@ def conferir_arquivos():
 
 
 def abrir_janelas(tv, touch, em_janela, cliques):
-    for nome, tela, tam in ((JANELA_TV, tv, (1920, 1080)),
-                            (JANELA_TOUCH, touch, (1280, 800))):
+    """Abre as duas janelas. Primeiro cada uma aparece num tamanho normal e
+    só depois de mapeada vira tela cheia: assim o Wayfire a deixa no monitor
+    onde ela abriu (veja configurar_telas.py, que fixa isso por regras)."""
+    alvos = ((JANELA_TV, tv, (1920, 1080)), (JANELA_TOUCH, touch, (1280, 800)))
+    for nome, tela, tam in alvos:
         cv2.namedWindow(nome, cv2.WINDOW_NORMAL)
         if em_janela:
             if nome == JANELA_TV:                  # metade do tamanho
@@ -90,11 +94,16 @@ def abrir_janelas(tv, touch, em_janela, cliques):
         elif tela:
             cv2.moveWindow(nome, tela["x"], tela["y"])
             cv2.resizeWindow(nome, tela["largura"], tela["altura"])
+        preto = np.zeros((tam[1], tam[0], 3), np.uint8)
+        cv2.imshow(nome, preto)
+    for _ in range(12):                            # deixa as janelas abrirem
+        cv2.waitKey(50)
+    if not em_janela:
+        for nome, _, _ in alvos:
             cv2.setWindowProperty(nome, cv2.WND_PROP_FULLSCREEN,
                                   cv2.WINDOW_FULLSCREEN)
-        else:
-            cv2.setWindowProperty(nome, cv2.WND_PROP_FULLSCREEN,
-                                  cv2.WINDOW_FULLSCREEN)
+        for _ in range(6):
+            cv2.waitKey(50)
 
     def ao_clicar(evento, x, y, flags, param):
         if evento == cv2.EVENT_LBUTTONDOWN:
@@ -125,6 +134,9 @@ def main():
     tv, touch = escolher_telas(listar_telas())
     if tv is touch:
         print("Atenção: só uma tela encontrada; as duas janelas ficam sobrepostas.")
+    elif tv:
+        print(f"TV em {tv['nome']} ({tv['largura']}x{tv['altura']}), touch em "
+              f"{touch['nome']} ({touch['largura']}x{touch['altura']})")
 
     if args.video:
         cam = VideoComoCamera(args.video)
