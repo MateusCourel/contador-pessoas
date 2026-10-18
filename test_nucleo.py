@@ -37,11 +37,19 @@ class RostoFalso:
         return self.malhas
 
 
+def mao_falsa(cx, cy, r=0.03):
+    return [(cx + (i % 5 - 2) * r / 2, cy + (i // 5 - 2) * r / 2)
+            for i in range(21)]
+
+
 class GestosFalso:
     def __init__(self):
         self.gesto = None
+        self.pontos = None
+        self.chamadas = 0
 
     def detectar(self, frame):
+        self.chamadas += 1
         return (self.gesto, 0.9)
 
 
@@ -143,9 +151,59 @@ class TesteNucleo(unittest.TestCase):
     def test_gesto_inicia_o_cadastro(self):
         self.rosto.malhas = [rosto_falso(*NARIZ["centro"])]
         self.gestos.gesto = "Open_Palm"
+        self.gestos.pontos = mao_falsa(0.5, 0.5)
         for _ in range(40):
             self.passo(0.8)
         self.assertEqual(self.nucleo.fluxo.estado, AVISO)
+
+    def test_palma_de_quem_esta_longe_nao_inicia(self):
+        self.rosto.malhas = []
+        self.gestos.gesto = "Open_Palm"
+        self.gestos.pontos = mao_falsa(0.97, 0.5)       # fora da pessoa
+        for _ in range(60):
+            self.passo(0.8)
+        self.assertEqual(self.nucleo.fluxo.estado, ESPERA)
+        self.assertIsNone(self.nucleo._mao)             # nem é desenhada
+
+    def test_so_a_pessoa_da_frente_conta(self):
+        # duas pessoas: a grande (perto) e a pequena (longe, à direita)
+        self.gestos.gesto = "Open_Palm"
+        self.gestos.pontos = mao_falsa(0.9, 0.4)        # mão da pequena
+        for _ in range(60):
+            self.t += 0.05
+            self.nucleo.passo(FRAME, self.t, [
+                (0.1, 0.1, 0.5, 0.95, 0.9),             # grande
+                (0.8, 0.4, 0.95, 0.7, 0.9)], None, None)
+        self.assertEqual(self.nucleo.fluxo.estado, ESPERA)
+
+    def test_mao_aparece_no_painel_e_some(self):
+        self.gestos.gesto = None
+        self.gestos.pontos = mao_falsa(0.5, 0.5)
+        for _ in range(10):
+            self.passo(0.8)
+        self.assertIsNotNone(self.nucleo._mao)
+        self.gestos.pontos = None
+        for _ in range(20):
+            self.passo(0.8)
+        # sem mão nova, o esqueleto expira (só fica 0,35 s)
+        self.assertGreater(self.t - self.nucleo._mao_t, 0.35)
+
+    def test_sem_ninguem_nao_procura_gesto(self):
+        for _ in range(40):
+            self.passo(None)
+        self.assertEqual(self.gestos.chamadas, 0)
+
+    def test_busca_lenta_sem_mao_e_rapida_com_mao(self):
+        self.gestos.gesto = None
+        for _ in range(40):                              # 2 s sem mão
+            self.passo(0.8)
+        lentas = self.gestos.chamadas
+        self.assertLessEqual(lentas, 9)                  # ~4 por segundo
+        self.gestos.pontos = mao_falsa(0.5, 0.5)
+        antes = self.gestos.chamadas
+        for _ in range(40):                              # 2 s com mão
+            self.passo(0.8)
+        self.assertGreater(self.gestos.chamadas - antes, 15)
 
     def test_linha_sobe_desce_e_salva(self):
         antes = self.nucleo.linha_y

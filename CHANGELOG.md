@@ -44,3 +44,9 @@
 - Etapa 1: câmera ao vivo com FPS
 - Etapa 2: detecção do gesto com barra de progresso
 - Testes automatizados da lógica do gatilho
+
+## v0.6.2
+- TV: removida a linha amarela horizontal sobre a imagem da câmera.
+- TV: esqueleto da mão (linhas verdes, pontos vermelhos) + anel de progresso, desenhado só na mão da pessoa da frente (maior caixa) antes do cadastro.
+- Busca de gestos só quando há alguém na frente; mais rápida (0,08 s) quando uma mão aparece, lenta (0,25 s) caso contrário.
+- Novo mao.py (+ test_mao.py); test_nucleo.py com novos casos.

@@ -11,7 +11,10 @@ a câmera por cima e se desenham as marcações das pessoas.
 """
 import cv2
 import numpy as np
+
 from PIL import Image, ImageDraw, ImageFont
+
+from gestos import LIGACOES_DA_MAO
 
 LARG, ALT = 1920, 1080
 CAM_X, CAM_Y, CAM_W, CAM_H = 30, 110, 1260, 709        # área da câmera (16:9)
@@ -234,13 +237,15 @@ class Painel:
 
     # ---------- montagem de cada quadro ----------
     def compor(self, camera_bgr, dados, pessoas=(), modo="ocioso", t=0.0,
-               linha=None, cadastro=None, barra=None):
+               linha=None, cadastro=None, barra=None, mao=None):
         """camera_bgr: quadro da câmera. pessoas: lista de dicts com
         'caixa' (x0,y0,x1,y1 normalizados), 'rotulo', 'cor' (RGB),
         e opcionalmente 'pontos' (malha do rosto, normalizada).
         linha: ((x,y),(x,y)) da linha de contagem. t: segundos (animação).
         cadastro: (título, subtítulo) mostrados na faixa durante o cadastro.
-        barra: progresso 0-1 desenhado na faixa (None = sem barra)."""
+        barra: progresso 0-1 desenhado na faixa (None = sem barra).
+        mao: (pontos_da_mao, progresso) da pessoa da frente: desenha o
+        esqueleto verde com pontos vermelhos e um anel de progresso."""
         chave = (modo, tuple(cadastro or ()), tuple(sorted((k, round(v, 1) if isinstance(v, float)
                                      else tuple(v) if isinstance(v, list)
                                      else v) for k, v in dados.items())))
@@ -261,6 +266,8 @@ class Painel:
             cv2.line(cam, p, q, (0, 215, 255), 3, cv2.LINE_AA)
         for pessoa in pessoas:
             self._marcar(cam, pessoa)
+        if mao:
+            self._desenhar_mao(cam, *mao)
         quadro[CAM_Y:CAM_Y + CAM_H, CAM_X:CAM_X + CAM_W] = cam
 
         if barra is not None and modo == "cadastro":
@@ -275,6 +282,24 @@ class Painel:
             cv2.rectangle(quadro, (30, 835), (1290, 985), (238, 211, 34),
                           espessura, cv2.LINE_AA)
         return quadro
+
+    @staticmethod
+    def _desenhar_mao(cam, pontos, progresso=0.0):
+        """Esqueleto da mão (linhas verdes, pontos vermelhos) e, enquanto a
+        palma é segurada, um anel que se completa em volta dela."""
+        xy = [(int(x * CAM_W), int(y * CAM_H)) for x, y in pontos]
+        for a, b in LIGACOES_DA_MAO:
+            cv2.line(cam, xy[a], xy[b], (0, 255, 0), 3, cv2.LINE_AA)
+        for p in xy:
+            cv2.circle(cam, p, 5, (0, 0, 255), -1, cv2.LINE_AA)
+        if progresso > 0:
+            cx = sum(xy[i][0] for i in (0, 5, 9, 13, 17)) // 5
+            cy = sum(xy[i][1] for i in (0, 5, 9, 13, 17)) // 5
+            raio = int(((xy[0][0] - xy[12][0]) ** 2 +
+                        (xy[0][1] - xy[12][1]) ** 2) ** 0.5 * 0.75) + 24
+            cv2.ellipse(cam, (cx, cy), (raio, raio), -90, 0,
+                        360 * min(progresso, 1.0), (36, 191, 251), 7,
+                        cv2.LINE_AA)
 
     def _marcar(self, cam, pessoa):
         x0, y0, x1, y1 = pessoa["caixa"]

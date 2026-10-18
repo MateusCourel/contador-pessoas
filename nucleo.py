@@ -13,6 +13,7 @@ from contagem import ContadorDeEntradas
 from embeddings import LARGURA_MINIMA
 from estatisticas import (HistoricoPorMinuto, MediaMovel, MedidorDeCpu,
                           ler_ram, ler_temperatura, formatar_hora)
+from mao import mao_da_pessoa, pessoa_da_frente
 from fluxo import CALIBRAR, ESPERA, FIM, NOME, POSES_, FluxoDeCadastro
 from gestos import GESTO_MAO_ABERTA, GatilhoPorTempo
 from identidades import (LIMITE_EXIBIR_NOME, GerenteDeIdentidades,
@@ -25,9 +26,12 @@ COR_DESCONHECIDO = (34, 211, 238)    # ciano
 COR_CADASTRANDO = (251, 191, 36)     # amarelo
 INTERVALO_TOUCH_S = 0.10             # a tela touch muda pouco: ~10 quadros/s
 INTERVALO_ROSTO_S = 0.15             # rosto no dia a dia: ~6 vezes por segundo
-INTERVALO_GESTO_S = 0.15             # gesto da mão: idem (o gatilho perdoa 0.25 s)
+INTERVALO_GESTO_LENTO_S = 0.25       # procurando a mão: ~4 vezes por segundo
+INTERVALO_GESTO_RAPIDO_S = 0.08      # mão à vista: ~12 vezes por segundo
+MAO_ATIVA_S = 1.5                    # tempo em modo rápido depois de ver a mão
+MAO_VISIVEL_S = 0.35                 # esqueleto fica na tela este tempo
 GUIA_LINHA_S = 4.0                   # linha visível no touch após mexer nela
-LINHA_NA_TV = True                   # False = esconde a linha amarela da TV
+LINHA_NA_TV = False                  # True = mostra a linha amarela na TV
 
 
 def _caixa_da_malha(pontos):
@@ -65,6 +69,9 @@ class Nucleo:
         self._pid_cadastro = None
         self._ultimo_rosto_t = -1e9
         self._ultimo_gesto_t = -1e9
+        self._mao = None                 # pontos da mão da pessoa da frente
+        self._mao_t = -1e9               # quando foi vista pela última vez
+        self._progresso_palma = 0.0
         self._guia_ate = -1e9
         self._ultimo_agora = None
         self._inicio = None
@@ -180,14 +187,30 @@ class Nucleo:
             self._tratar_toque(toque, agora)
         self._tratar_tecla(tecla, agora)
 
+        frente = pessoa_da_frente(visiveis)
         if self.fluxo.estado == ESPERA and self.gestos is not None and \
-                visiveis and agora - self._ultimo_gesto_t >= INTERVALO_GESTO_S:
-            self._ultimo_gesto_t = agora
-            res = self.gestos.detectar(frame)
-            gesto = res[0] if res else None
-            _, disparou = self.gatilho.update(gesto == GESTO_MAO_ABERTA, agora)
-            if disparou:
-                self.fluxo.iniciar(agora)
+                frente is not None:
+            intervalo = (INTERVALO_GESTO_RAPIDO_S
+                         if agora - self._mao_t < MAO_ATIVA_S
+                         else INTERVALO_GESTO_LENTO_S)
+            if agora - self._ultimo_gesto_t >= intervalo:
+                self._ultimo_gesto_t = agora
+                res = self.gestos.detectar(frame)
+                gesto = res[0] if res else None
+                pontos = getattr(self.gestos, "pontos", None)
+                # só vale a mão de quem está na frente (a de maior caixa)
+                de_quem_esta_na_frente = (pontos is not None and
+                                          mao_da_pessoa(pontos, frente.caixa))
+                if de_quem_esta_na_frente:
+                    self._mao, self._mao_t = pontos, agora
+                ativo = de_quem_esta_na_frente and gesto == GESTO_MAO_ABERTA
+                self._progresso_palma, disparou = self.gatilho.update(
+                    ativo, agora)
+                if disparou:
+                    self.fluxo.iniciar(agora)
+        elif self.fluxo.ativo or frente is None:
+            self._mao = None
+            self._progresso_palma = 0.0
 
         rosto_cadastro, pid_cadastro = None, None
         if self.fluxo.ativo and rostos:
@@ -217,10 +240,14 @@ class Nucleo:
             cadastro, barra = None, None
 
         a, b = self._linha()
+        mao_tv = None
+        if self._mao is not None and agora - self._mao_t < MAO_VISIVEL_S \
+                and not self.fluxo.ativo:
+            mao_tv = (self._mao, self._progresso_palma)
         tv = self.painel.compor(frame, dados, pessoas, modo=modo,
                                 t=agora - self._inicio,
                                 linha=(a, b) if LINHA_NA_TV else None,
-                                cadastro=cadastro, barra=barra)
+                                cadastro=cadastro, barra=barra, mao=mao_tv)
 
         tocou = toque is not None or tecla not in (None, -1, 255)
         if tocou or self._img_touch is None or agora >= self._touch_ate:
