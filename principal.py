@@ -85,6 +85,8 @@ def main():
     ap.add_argument("--video", help="usa um arquivo de vídeo no lugar da câmera")
     ap.add_argument("--lotacao", type=int, default=None)
     ap.add_argument("--yolo", default="yolo11n_ncnn_model")
+    ap.add_argument("--nao-organizar-telas", action="store_true",
+                    help="não arruma sozinho a posição/resolução das telas")
     ap.add_argument("--sem-ponteiro", action="store_true",
                     help="não usa o ponteiro virtual para escolher a tela")
     args = ap.parse_args()
@@ -100,6 +102,9 @@ def main():
         print(erro)
         sys.exit(1)
 
+    if not args.nao_organizar_telas and not args.janela:
+        from organizar_telas import organizar
+        organizar(log=print)
     tv, touch = escolher_telas(listar_telas())
     if tv is touch:
         print("Atenção: só uma tela encontrada; as duas janelas ficam sobrepostas.")
@@ -127,6 +132,7 @@ def main():
                              usar_ponteiro=not args.sem_ponteiro,
                              log=print)
     erros_seguidos, ultimo_aviso, tecla_pendente = 0, 0.0, None
+    ultimo_resumo = time.monotonic()
     print("Rodando. Q (na tela inicial) sai.")
     try:
         while not nucleo.sair:
@@ -154,6 +160,10 @@ def main():
                 if erros_seguidos > 100:
                     raise
                 continue
+            if agora - ultimo_resumo >= 10:
+                ultimo_resumo = agora
+                print(nucleo.resumo_de_desempenho(
+                    sum(1 for q in nucleo._pistas if q.visivel)), flush=True)
             cv2.imshow(JANELA_TV, img_tv)
             cv2.imshow(JANELA_TOUCH, img_touch)
             tecla = cv2.waitKey(1) & 0xFF

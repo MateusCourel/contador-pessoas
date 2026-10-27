@@ -50,3 +50,11 @@
 - TV: esqueleto da mão (linhas verdes, pontos vermelhos) + anel de progresso, desenhado só na mão da pessoa da frente (maior caixa) antes do cadastro.
 - Busca de gestos só quando há alguém na frente; mais rápida (0,08 s) quando uma mão aparece, lenta (0,25 s) caso contrário.
 - Novo mao.py (+ test_mao.py); test_nucleo.py com novos casos.
+
+## v0.6.3 (para sala cheia)
+- Rosto só é procurado em quem está perto (caixa ≥ 35% da altura); quem não mostra rosto útil espera 1,2 s antes de nova tentativa; com 3+ candidatos o detector roda no máximo 2,5x/s (antes ~6x/s sem parar).
+- Log de desempenho a cada 10 s no terminal (FPS, pessoas, ms de rosto/gesto/TV/touch/YOLO).
+- diagnostico_telas.sh para investigar telas, câmeras e temperatura.
+
+## v0.6.4
+- organizar_telas.py: ao abrir, identifica o touch (modo 1280x800) e a TV pelo que são, não pela porta HDMI; força touch 1280x800 em 0,0 e TV 1920x1080@60 em 1280,0 (wlr-randr) e corrige o toque no wayfire.ini (cópia em wayfire.ini.bak). Resolve TV em 4K/portas trocadas. Opção --nao-organizar-telas desliga.
