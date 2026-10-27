@@ -103,5 +103,68 @@ class TesteContagem(unittest.TestCase):
         self.assertEqual((self.c.entraram, self.c.sairam), (0, 0))
 
 
+class TesteInferencia(unittest.TestCase):
+    """Quem aparece já depois da linha, andando para longe dela."""
+
+    def setUp(self):
+        self.c = ContadorDeEntradas()
+        # começa o relógio e espera a "graça" inicial passar
+        self.c.atualizar({}, 0.0, {})
+
+    def anda(self, pid, ys, t0, nasceu_em, dt=0.1):
+        eventos = []
+        for k, y in enumerate(ys):
+            t = t0 + k * dt
+            eventos += self.c.atualizar({pid: (0.5, y)}, t,
+                                        {pid: t - nasceu_em})
+        return eventos
+
+    def test_nasce_logo_apos_a_linha_e_se_afasta_conta_entrada(self):
+        ev = self.anda(1, [0.58, 0.62, 0.68, 0.74], t0=10.0, nasceu_em=10.0)
+        self.assertEqual(ev, [(1, "entrou")])
+        self.assertEqual(self.c.inferidos, 1)
+
+    def test_nasce_do_outro_lado_e_se_afasta_conta_saida(self):
+        ev = self.anda(1, [0.42, 0.38, 0.32, 0.26], t0=10.0, nasceu_em=10.0)
+        self.assertEqual(ev, [(1, "saiu")])
+
+    def test_conta_uma_vez_so(self):
+        ev = self.anda(1, [0.58, 0.64, 0.7, 0.76, 0.82, 0.88], 10.0, 10.0)
+        self.assertEqual(len(ev), 1)
+
+    def test_nasce_longe_da_linha_nao_conta(self):
+        ev = self.anda(1, [0.85, 0.9, 0.95], t0=10.0, nasceu_em=10.0)
+        self.assertEqual(ev, [])
+
+    def test_nasce_perto_mas_nao_se_afasta_nao_conta(self):
+        ev = self.anda(1, [0.58, 0.57, 0.59, 0.58, 0.6], 10.0, 10.0)
+        self.assertEqual(ev, [])
+
+    def test_quem_ja_estava_na_sala_ao_abrir_nao_conta(self):
+        # pista nasceu dentro dos 3 s de graça do início do programa
+        ev = self.anda(1, [0.58, 0.64, 0.7, 0.76], t0=1.0, nasceu_em=1.0)
+        self.assertEqual(ev, [])
+
+    def test_pista_velha_nao_conta_mesmo_perto_da_linha(self):
+        ev = self.anda(1, [0.58, 0.64, 0.7, 0.76], t0=10.0, nasceu_em=2.0)
+        self.assertEqual(ev, [])
+
+    def test_travessia_normal_nao_conta_em_dobro(self):
+        ev = self.anda(1, [0.3, 0.4, 0.6, 0.7, 0.8, 0.9], 10.0, 10.0)
+        self.assertEqual(ev, [(1, "entrou")])
+        self.assertEqual(self.c.inferidos, 0)
+
+    def test_pode_desligar(self):
+        self.c.inferir_nascimento = False
+        ev = self.anda(1, [0.58, 0.64, 0.7, 0.76], 10.0, 10.0)
+        self.assertEqual(ev, [])
+
+    def test_mover_a_linha_nao_gera_contagem(self):
+        self.anda(1, [0.58, 0.6], 10.0, 10.0)
+        self.c.mover_linha((0, 0.3), (1, 0.3), False)
+        ev = self.anda(1, [0.64, 0.7, 0.76], 10.3, 10.0)
+        self.assertEqual(ev, [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

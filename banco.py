@@ -33,6 +33,7 @@ class Banco:
                         exist_ok=True)
         self._con = sqlite3.connect(caminho)
         self._con.execute("PRAGMA foreign_keys = ON")
+        self._cache = None       # (nomes, matriz) em memória; None = refazer
         self._con.executescript("""
             CREATE TABLE IF NOT EXISTS pessoas (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,6 +71,7 @@ class Banco:
                     "INSERT INTO embeddings (pessoa_id, pose, vetor) "
                     "VALUES (?, ?, ?)",
                     (pid, pose, normalizar(vetor).tobytes()))
+        self._cache = None
         return pid
 
     def listar(self):
@@ -90,23 +92,56 @@ class Banco:
         with self._con:
             cur = self._con.execute("DELETE FROM pessoas WHERE id = ?",
                                     (pessoa_id,))
+        self._cache = None
         return cur.rowcount > 0
+
+    def _carregar(self):
+        """Todos os embeddings numa matriz só (uma conta única por rosto, em
+        vez de uma consulta ao SQLite a cada reconhecimento)."""
+        if self._cache is None:
+            linhas = self._con.execute("""
+                SELECT p.nome, e.vetor FROM embeddings e
+                JOIN pessoas p ON p.id = e.pessoa_id
+                ORDER BY p.id, e.id""").fetchall()
+            nomes = [n for n, _ in linhas]
+            matriz = (np.stack([np.frombuffer(v, dtype=np.float32)
+                                for _, v in linhas])
+                      if linhas else np.zeros((0, 1), np.float32))
+            self._cache = (nomes, matriz)
+        return self._cache
+
+    def ranking(self, vetor):
+        """Quem mais se parece com o rosto, da pessoa mais parecida para a
+        menos: [(nome, nota, maxima)].
+        maxima = melhor semelhança entre os embeddings da pessoa;
+        nota   = média das DUAS melhores (uma pose parecida por acaso não
+                 basta: pelo menos duas têm que bater). Com um só embedding,
+                 a nota é a própria máxima."""
+        nomes, matriz = self._carregar()
+        if not nomes:
+            return []
+        sims = matriz @ normalizar(vetor)
+        por_pessoa = {}
+        for nome, s in zip(nomes, sims):
+            por_pessoa.setdefault(nome, []).append(float(s))
+        saida = []
+        for nome, lista in por_pessoa.items():
+            lista.sort(reverse=True)
+            nota = sum(lista[:2]) / len(lista[:2])
+            saida.append((nome, nota, lista[0]))
+        saida.sort(key=lambda t: -t[1])
+        return saida
 
     def identificar(self, vetor, limite=LIMITE_RECONHECER):
         """Devolve (nome, semelhança). Se ninguém passar do limite,
         o nome é None (e a semelhança é a melhor encontrada)."""
-        alvo = normalizar(vetor)
-        melhor_nome, melhor = None, -1.0
-        linhas = self._con.execute("""
-            SELECT p.nome, e.vetor FROM embeddings e
-            JOIN pessoas p ON p.id = e.pessoa_id""").fetchall()
-        for nome, blob in linhas:
-            sim = float(np.dot(alvo, np.frombuffer(blob, dtype=np.float32)))
-            if sim > melhor:
-                melhor_nome, melhor = nome, sim
-        if melhor_nome is None:
+        nomes, matriz = self._carregar()
+        if not nomes:
             return None, 0.0
-        return (melhor_nome if melhor >= limite else None), melhor
+        sims = matriz @ normalizar(vetor)
+        i = int(np.argmax(sims))
+        melhor = float(sims[i])
+        return (nomes[i] if melhor >= limite else None), melhor
 
     def fechar(self):
         self._con.close()

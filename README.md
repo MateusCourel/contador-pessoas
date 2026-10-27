@@ -213,6 +213,21 @@ e refaça o passo de criar o ambiente.
 O ambiente não está ativo. Rode `source ~/contador/bin/activate` (o terminal
 mostra `(contador)` no começo da linha quando está ativo).
 
+## 4b. Ajustes para sala cheia (v0.7)
+
+- **Alcance da detecção:** o modelo padrão tem entrada quadrada 320x320, o que
+  desperdiça quase metade da imagem (a câmera é 16:9). Gere um modelo
+  retangular, no ambiente que tem o `ultralytics`:
+  `python exportar_yolo.py` (448x256, quase o mesmo custo, ~40% mais detalhe)
+  ou `python exportar_yolo.py --largura 576 --altura 320` (mais alcance, mais
+  pesado). Copie a pasta gerada para o projeto e use
+  `python principal.py --yolo yolo11n_ncnn_model_448x256`. O tamanho é lido
+  do `metadata.yaml` da pasta.
+- **Entradas inferidas:** quem aparece já depois da linha e se afasta dela é
+  contado. Para desligar, coloque `"inferir_nascimento": false` em
+  `dados/config.json`.
+- **Porcentagem:** 50% é o mínimo para aceitar um nome; 99% é muito parecido.
+
 ## 5. Roadmap
 
 - [x] 1. Câmera ao vivo (CSI ou USB)

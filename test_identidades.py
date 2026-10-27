@@ -8,8 +8,8 @@ import unittest
 
 from estatisticas import (Configuracao, HistoricoPorMinuto, MediaMovel,
                           RegistroDeEventos, calcular_cpu, calcular_ram)
-from identidades import (GerenteDeIdentidades, associar_rostos,
-                         largura_do_rosto)
+from identidades import (GerenteDeIdentidades, associar_rostos, confianca,
+                         decidir, largura_do_rosto, rosto_de_frente)
 
 
 def malha(nx, ny, meia=0.05):
@@ -70,17 +70,109 @@ class TesteGerente(unittest.TestCase):
         self.assertFalse(g.precisa_tentar(1, 0.3))
         self.assertTrue(g.precisa_tentar(1, 0.8))
 
-    def test_desiste_depois_de_max_tentativas(self):
-        g = GerenteDeIdentidades(intervalo_s=0.0, max_tentativas=3)
+    def test_pausa_depois_de_max_tentativas_e_retoma(self):
+        g = GerenteDeIdentidades(intervalo_s=0.0, max_tentativas=3,
+                                 retomar_s=6.0)
         for i in range(3):
             g.registrar(1, None, 0.1, float(i))
-        self.assertFalse(g.precisa_tentar(1, 10.0))
+        self.assertFalse(g.precisa_tentar(1, 5.0))     # descansando
+        self.assertTrue(g.precisa_tentar(1, 9.0))      # volta a tentar
 
-    def test_para_de_tentar_depois_de_travar(self):
-        g = GerenteDeIdentidades(intervalo_s=0.0)
-        g.definir(1, "Ana")
-        self.assertFalse(g.precisa_tentar(1, 5.0))
+    def test_travado_so_reverifica_depois_do_intervalo(self):
+        g = GerenteDeIdentidades(reverificar_s=2.5)
+        g.definir(1, "Ana", agora=0.0)
+        self.assertFalse(g.precisa_tentar(1, 1.0))
+        self.assertTrue(g.precisa_tentar(1, 3.0))
         self.assertEqual(g.nome(1), "Ana")
+
+    def test_reverificar_suaviza_a_porcentagem(self):
+        g = GerenteDeIdentidades(votos=2, reverificar_s=1.0)
+        g.registrar(1, "Ana", 0.60, 0.0)
+        g.registrar(1, "Ana", 0.60, 1.0)
+        antes = g.porcentagem(1)
+        g.registrar(1, "Ana", 0.70, 3.0)
+        self.assertGreater(g.porcentagem(1), antes)
+        self.assertLess(g.semelhanca(1), 0.70)       # média, não o último
+
+    def test_solta_o_nome_depois_de_falhas_seguidas(self):
+        g = GerenteDeIdentidades(votos=2, falhas_max=3, reverificar_s=1.0)
+        g.registrar(1, "Ana", 0.6, 0.0)
+        g.registrar(1, "Ana", 0.6, 1.0)
+        g.registrar(1, None, 0.2, 2.0)
+        g.registrar(1, None, 0.2, 3.0)
+        self.assertEqual(g.nome(1), "Ana")           # ainda aguenta 2
+        g.registrar(1, None, 0.2, 4.0)
+        self.assertIsNone(g.nome(1))
+
+    def test_um_acerto_no_meio_zera_as_falhas(self):
+        g = GerenteDeIdentidades(votos=2, falhas_max=3, reverificar_s=1.0)
+        g.registrar(1, "Ana", 0.6, 0.0)
+        g.registrar(1, "Ana", 0.6, 1.0)
+        g.registrar(1, None, 0.2, 2.0)
+        g.registrar(1, None, 0.2, 3.0)
+        g.registrar(1, "Ana", 0.6, 4.0)
+        g.registrar(1, None, 0.2, 5.0)
+        self.assertEqual(g.nome(1), "Ana")
+
+    def test_mesmo_nome_em_duas_pessoas_fica_so_com_a_melhor(self):
+        g = GerenteDeIdentidades(votos=1)
+        g.registrar(1, "Mateus", 0.70, 0.0)
+        g.registrar(2, "Mateus", 0.50, 0.0)
+        g.registrar(3, "Mateus", 0.55, 0.0)
+        rebaixados = g.resolver_unicidade({1, 2, 3})
+        self.assertEqual(sorted(rebaixados), [2, 3])
+        self.assertEqual(g.nome(1), "Mateus")
+        self.assertIsNone(g.nome(2))
+        self.assertIn("Mateus", g.negados(2))
+        self.assertIsNone(g.nome(3))
+
+    def test_dono_do_nome(self):
+        g = GerenteDeIdentidades(votos=1)
+        g.registrar(1, "Ana", 0.6, 0.0)
+        self.assertEqual(g.dono_do_nome("Ana")[0], 1)
+        self.assertIsNone(g.dono_do_nome("Ana", menos_pid=1))
+        self.assertIsNone(g.dono_do_nome("Bia"))
+
+    def test_rotulo_com_porcentagem(self):
+        g = GerenteDeIdentidades(votos=1)
+        self.assertEqual(g.rotulo_com_confianca(9), "Pessoa · ID 9")
+        g.registrar(1, "Mateus Courel", 0.60, 0.0)
+        self.assertRegex(g.rotulo_com_confianca(1), r"^Mateus Courel · \d+%$")
+
+
+class TesteDecisao(unittest.TestCase):
+    def test_aceita_quando_tudo_alto(self):
+        r = [("Ana", 0.62, 0.70), ("Bia", 0.20, 0.25)]
+        self.assertEqual(decidir(r)[0], "Ana")
+
+    def test_recusa_nota_baixa(self):
+        self.assertIsNone(decidir([("Ana", 0.38, 0.55)])[0])
+
+    def test_recusa_maxima_baixa(self):
+        self.assertIsNone(decidir([("Ana", 0.46, 0.48)])[0])
+
+    def test_recusa_rosto_ambiguo(self):
+        r = [("Ana", 0.55, 0.65), ("Bia", 0.52, 0.60)]
+        self.assertIsNone(decidir(r)[0])
+
+    def test_nome_excluido_vira_outro_ou_ninguem(self):
+        r = [("Ana", 0.62, 0.70), ("Bia", 0.30, 0.35)]
+        self.assertIsNone(decidir(r, excluir={"Ana"})[0])
+        self.assertEqual(decidir([], excluir={"Ana"}), (None, 0.0))
+
+    def test_confianca_cresce_e_tem_limites(self):
+        self.assertEqual(confianca(0.42), 50)
+        self.assertGreater(confianca(0.6), confianca(0.5))
+        self.assertEqual(confianca(0.90), 99)
+        self.assertLess(confianca(0.2), 50)
+        self.assertEqual(confianca(-1.0), 0)
+
+    def test_so_rosto_de_frente(self):
+        self.assertTrue(rosto_de_frente((0.5, 0.6)))
+        self.assertFalse(rosto_de_frente((0.8, 0.6)))
+        self.assertFalse(rosto_de_frente((0.5, 0.95)))
+        self.assertFalse(rosto_de_frente(None))
+
 
     def test_esquecer_ausentes(self):
         g = GerenteDeIdentidades()

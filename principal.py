@@ -85,6 +85,9 @@ def main():
     ap.add_argument("--video", help="usa um arquivo de vídeo no lugar da câmera")
     ap.add_argument("--lotacao", type=int, default=None)
     ap.add_argument("--yolo", default="yolo11n_ncnn_model")
+    ap.add_argument("--yolo-tamanho", default=None, metavar="LxA",
+                    help="entrada do modelo, ex. 448x256 (padrão: lê o "
+                         "metadata.yaml da pasta do modelo; senão 320x320)")
     ap.add_argument("--nao-organizar-telas", action="store_true",
                     help="não arruma sozinho a posição/resolução das telas")
     ap.add_argument("--sem-ponteiro", action="store_true",
@@ -97,7 +100,12 @@ def main():
     from rosto import DetectorDeRosto
 
     try:
-        yolo = DetectorDePessoas(args.yolo, threads=3)
+        tamanho = None
+        if args.yolo_tamanho:
+            l, a = args.yolo_tamanho.lower().split("x")
+            tamanho = (int(l), int(a))
+        yolo = DetectorDePessoas(args.yolo, tamanho=tamanho, threads=3)
+        print(f"[yolo] entrada {yolo.tamanho[0]}x{yolo.tamanho[1]}")
     except FileNotFoundError as erro:
         print(erro)
         sys.exit(1)
@@ -133,6 +141,7 @@ def main():
                              log=print)
     erros_seguidos, ultimo_aviso, tecla_pendente = 0, 0.0, None
     ultimo_resumo = time.monotonic()
+    ultimo_touch = None
     print("Rodando. Q (na tela inicial) sai.")
     try:
         while not nucleo.sair:
@@ -165,7 +174,9 @@ def main():
                 print(nucleo.resumo_de_desempenho(
                     sum(1 for q in nucleo._pistas if q.visivel)), flush=True)
             cv2.imshow(JANELA_TV, img_tv)
-            cv2.imshow(JANELA_TOUCH, img_touch)
+            if img_touch is not ultimo_touch:       # só quando mudou
+                cv2.imshow(JANELA_TOUCH, img_touch)
+                ultimo_touch = img_touch
             tecla = cv2.waitKey(1) & 0xFF
             if tecla != 255:
                 tecla_pendente = tecla

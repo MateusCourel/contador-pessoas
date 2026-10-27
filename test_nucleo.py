@@ -32,8 +32,10 @@ def centro(r):
 class RostoFalso:
     def __init__(self):
         self.malhas = []
+        self.chamadas = 0
 
     def detectar_todos(self, frame):
+        self.chamadas += 1
         return self.malhas
 
 
@@ -82,6 +84,20 @@ class TesteNucleo(unittest.TestCase):
         for i in range(passos + 1):
             self.passo(y0 + (y1 - y0) * i / passos)
 
+    def test_painel_incremental_igual_ao_desenho_completo(self):
+        d1 = {"hora": "10:00", "entraram": 1, "sairam": 0, "dentro": 1,
+              "na_camera": 1, "fps": 20.0, "temp": 50.0, "cpu": 30.0,
+              "ram": 40.0, "latencia_ms": 50.0, "uptime_s": 5,
+              "historico": [0, 1, 2]}
+        d2 = dict(d1, entraram=4, fps=12.5, hora="10:01", historico=[0, 3, 1])
+        cam = np.full((720, 1280, 3), 60, np.uint8)
+        incremental = Painel()
+        incremental.compor(cam, d1, modo="ocioso")
+        incremental.compor(cam, d1, modo="convite", t=0.3)    # animação
+        a = incremental.compor(cam, d2, modo="ocioso").copy()
+        b = Painel().compor(cam, d2, modo="ocioso")
+        self.assertTrue(np.array_equal(a, b))
+
     def test_telas_tem_o_tamanho_certo(self):
         tv, touch = self.passo(None)
         self.assertEqual(tv.shape, (1080, 1920, 3))
@@ -112,6 +128,32 @@ class TesteNucleo(unittest.TestCase):
         for _ in range(60):
             self.passo(0.8)
         self.assertEqual(self.nucleo.identidades.nome(1), "Ana")
+
+    def test_rotulo_mostra_a_porcentagem(self):
+        self.banco.cadastrar("Ana", {"centro": VETOR, "esquerda": VETOR})
+        self.rosto.malhas = [rosto_falso(*NARIZ["centro"])]
+        for _ in range(60):
+            self.passo(0.8)
+        self.assertRegex(self.nucleo.identidades.rotulo_com_confianca(1),
+                         r"^Ana · \d+%$")
+
+    def test_rosto_de_lado_nao_e_reconhecido(self):
+        self.banco.cadastrar("Ana", {"centro": VETOR, "esquerda": VETOR})
+        self.rosto.malhas = [rosto_falso(*NARIZ["direita"])]
+        for _ in range(60):
+            self.passo(0.8)
+        self.assertIsNone(self.nucleo.identidades.nome(1))
+
+    def test_dois_rostos_nao_viram_o_mesmo_nome(self):
+        self.banco.cadastrar("Ana", {"centro": VETOR, "esquerda": VETOR})
+        self.rosto.malhas = [rosto_falso(0.3, 0.56), rosto_falso(0.7, 0.56)]
+        for _ in range(80):
+            self.t += 0.05
+            self.nucleo.passo(FRAME, self.t, [
+                (0.1, 0.1, 0.45, 0.95, 0.9),
+                (0.55, 0.1, 0.9, 0.95, 0.9)], None, None)
+        nomes = [self.nucleo.identidades.nome(p) for p in (1, 2)]
+        self.assertLessEqual(nomes.count("Ana"), 1)
 
     def test_desconhecido_fica_sem_nome(self):
         outro = np.random.RandomState(7).randn(128).astype(np.float32)
@@ -187,6 +229,19 @@ class TesteNucleo(unittest.TestCase):
             self.passo(0.8)
         # sem mão nova, o esqueleto expira (só fica 0,35 s)
         self.assertGreater(self.t - self.nucleo._mao_t, 0.35)
+
+    def test_gente_longe_nao_gasta_detector_de_rosto(self):
+        for _ in range(60):                       # caixa de 0.2 de altura
+            self.t += 0.05
+            self.nucleo.passo(FRAME, self.t, [(0.4, 0.3, 0.5, 0.5, 0.9)],
+                              None, None)
+        self.assertEqual(self.rosto.chamadas, 0)
+
+    def test_sem_rosto_util_espera_antes_de_tentar_de_novo(self):
+        self.rosto.malhas = []
+        for _ in range(40):                       # 2 s, pessoa perto
+            self.passo(0.9)
+        self.assertLessEqual(self.rosto.chamadas, 3)
 
     def test_sem_ninguem_nao_procura_gesto(self):
         for _ in range(40):

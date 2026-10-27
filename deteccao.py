@@ -9,23 +9,53 @@ As funções de preparar a imagem e ler a resposta do modelo são separadas da
 parte que usa o NCNN, para poderem ser testadas sem o modelo.
 """
 import os
+import re
 
 import cv2
 import numpy as np
 
-TAMANHO = 320            # o modelo foi exportado com imgsz=320
+TAMANHO = 320            # padrão: modelo exportado com imgsz=320 (quadrado)
 COR_PREENCHIMENTO = 114  # cinza usado pelo YOLO nas bordas
 
 
+def _largura_altura(tamanho):
+    """320 -> (320, 320);  (448, 256) -> (448, 256)  (largura, altura)."""
+    if isinstance(tamanho, (tuple, list)):
+        return int(tamanho[0]), int(tamanho[1])
+    return int(tamanho), int(tamanho)
+
+
+def ler_tamanho_do_modelo(pasta, padrao=TAMANHO):
+    """Lê o tamanho de entrada (largura, altura) do metadata.yaml que o
+    Ultralytics grava junto do modelo NCNN (lá vem como [altura, largura]).
+    Sem o arquivo, usa o padrão quadrado."""
+    try:
+        with open(os.path.join(pasta, "metadata.yaml"),
+                  encoding="utf-8") as arq:
+            texto = arq.read()
+    except OSError:
+        return _largura_altura(padrao)
+    m = re.search(r"imgsz:\s*\[\s*(\d+)\s*,\s*(\d+)\s*\]", texto)
+    if not m:
+        m = re.search(r"imgsz:\s*\n\s*-\s*(\d+)\s*\n\s*-\s*(\d+)", texto)
+    if not m:
+        return _largura_altura(padrao)
+    altura, largura = int(m.group(1)), int(m.group(2))
+    return largura, altura
+
+
 def preparar_imagem(frame_bgr, tamanho=TAMANHO):
-    """Redimensiona sem deformar e completa com cinza até ficar quadrada.
-    Devolve (imagem tamanho x tamanho, escala, deslocamento_x, deslocamento_y)."""
+    """Redimensiona sem deformar e completa com cinza até o tamanho do
+    modelo (quadrado ou retangular).
+    Devolve (imagem altura x largura, escala, deslocamento_x, deslocamento_y)."""
+    tw, th = _largura_altura(tamanho)
     h, w = frame_bgr.shape[:2]
-    escala = min(tamanho / w, tamanho / h)
+    escala = min(tw / w, th / h)
     nw, nh = int(round(w * escala)), int(round(h * escala))
-    redim = cv2.resize(frame_bgr, (nw, nh), interpolation=cv2.INTER_LINEAR)
-    dx, dy = (tamanho - nw) // 2, (tamanho - nh) // 2
-    img = np.full((tamanho, tamanho, 3), COR_PREENCHIMENTO, np.uint8)
+    # INTER_AREA conserva bem mais detalhe de quem está longe ao reduzir
+    redim = cv2.resize(frame_bgr, (nw, nh), interpolation=cv2.INTER_AREA)
+    dx, dy = (tw - nw) // 2, (th - nh) // 2
+    img = np.full((th, tw, 3), COR_PREENCHIMENTO, np.uint8)
     img[dy:dy + nh, dx:dx + nw] = redim
     return img, escala, dx, dy
 
@@ -54,7 +84,7 @@ def _nms(caixas, notas, limite_iou):
 
 
 def decodificar(saida, escala, dx, dy, largura, altura, conf_minima=0.15,
-                limite_nms=0.5):
+                limite_nms=0.6):
     """Transforma a resposta do YOLO11 em caixas de pessoas.
 
     saida: matriz (84, N) (ou (N, 84)): 4 números da caixa (centro x, centro
@@ -89,7 +119,7 @@ def decodificar(saida, escala, dx, dy, largura, altura, conf_minima=0.15,
 class DetectorDePessoas:
     """Envolve o modelo YOLO11n em NCNN. detectar() devolve as pessoas."""
 
-    def __init__(self, pasta="yolo11n_ncnn_model", tamanho=TAMANHO,
+    def __init__(self, pasta="yolo11n_ncnn_model", tamanho=None,
                  conf_minima=0.15, threads=4):
         param = os.path.join(pasta, "model.ncnn.param")
         pesos = os.path.join(pasta, "model.ncnn.bin")
@@ -99,7 +129,9 @@ class DetectorDePessoas:
                 "yolo_teste.py (ele cria a pasta yolo11n_ncnn_model).")
         import ncnn      # aqui dentro: os testes não exigem o NCNN
         self._ncnn = ncnn
-        self.tamanho = tamanho
+        # sem tamanho dado, vale o que o modelo diz no metadata.yaml
+        self.tamanho = _largura_altura(
+            tamanho if tamanho is not None else ler_tamanho_do_modelo(pasta))
         self.conf_minima = conf_minima
         self._net = ncnn.Net()
         self._net.opt.use_vulkan_compute = False

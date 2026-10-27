@@ -7,7 +7,10 @@ import unittest
 
 import numpy as np
 
-from deteccao import decodificar, preparar_imagem
+import os
+import tempfile
+
+from deteccao import decodificar, ler_tamanho_do_modelo, preparar_imagem
 from rastreador import Rastreador, iou
 
 
@@ -23,6 +26,81 @@ class TesteIou(unittest.TestCase):
 
     def test_metade(self):
         self.assertAlmostEqual(iou((0, 0, 1, 1), (0.5, 0, 1.5, 1)), 1 / 3)
+
+
+class TesteTamanhoDoModelo(unittest.TestCase):
+    def test_retangular_preenche_sem_deformar(self):
+        frame = np.zeros((720, 1280, 3), np.uint8)
+        img, escala, dx, dy = preparar_imagem(frame, (448, 256))
+        self.assertEqual(img.shape, (256, 448, 3))
+        self.assertAlmostEqual(escala, 0.35, places=2)
+        self.assertEqual(dx, 0)
+        self.assertEqual(dy, 2)
+
+    def test_quadrado_continua_igual(self):
+        img, escala, dx, dy = preparar_imagem(np.zeros((720, 1280, 3),
+                                                       np.uint8), 320)
+        self.assertEqual(img.shape, (320, 320, 3))
+        self.assertEqual((dx, dy), (0, 70))
+
+    def test_le_o_metadata_do_ultralytics(self):
+        with tempfile.TemporaryDirectory() as p:
+            with open(os.path.join(p, "metadata.yaml"), "w") as f:
+                f.write("task: detect\nimgsz:\n- 256\n- 448\nnames:\n  0: person\n")
+            self.assertEqual(ler_tamanho_do_modelo(p), (448, 256))
+            with open(os.path.join(p, "metadata.yaml"), "w") as f:
+                f.write("imgsz: [320, 320]\n")
+            self.assertEqual(ler_tamanho_do_modelo(p), (320, 320))
+
+    def test_sem_metadata_usa_o_padrao(self):
+        with tempfile.TemporaryDirectory() as p:
+            self.assertEqual(ler_tamanho_do_modelo(p), (320, 320))
+
+    def test_decodifica_modelo_retangular(self):
+        # 200 âncoras; a 1ª é pessoa certa no meio da imagem 448x256
+        a = np.zeros((84, 200), np.float32)
+        a[:4, 0] = [224, 128, 40, 100]      # cx, cy, w, h (em px do modelo)
+        a[4, 0] = 0.9
+        r = decodificar(a, 0.35, 0, 2, 1280, 720)
+        self.assertEqual(len(r), 1)
+        x0, y0, x1, y1, conf = r[0]
+        self.assertAlmostEqual((x0 + x1) / 2, 0.5, places=2)
+
+
+class TesteMelhorias(unittest.TestCase):
+    def test_duplicata_sobreposta_nao_vira_outra_pessoa(self):
+        r = Rastreador()
+        for i in range(4):
+            r.atualizar([caixa(0.5)], i * 0.08)
+        # a mesma pessoa vem duas vezes (caixa um pouco deslocada, IoU alto)
+        pistas = r.atualizar([caixa(0.5), caixa(0.52, conf=0.6)], 0.4)
+        self.assertEqual(len(pistas), 1)
+
+    def test_resgata_quem_reaparece_longe_sem_trocar_de_id(self):
+        r = Rastreador(guardar_s=2.0)
+        for i in range(6):                        # anda para a direita
+            pistas = r.atualizar([caixa(0.2 + i * 0.03)], i * 0.08)
+        id_original = pistas[0].id
+        # some por 0,5 s (atrás de alguém) e reaparece onde estaria, mas as
+        # caixas não se tocam mais (IoU 0)
+        pistas = r.atualizar([], 0.6)
+        pistas = r.atualizar([caixa(0.64, w=0.12)], 1.0)
+        self.assertEqual([p.id for p in pistas if p.visivel], [id_original])
+
+    def test_nao_resgata_quem_esta_longe_demais(self):
+        r = Rastreador(guardar_s=2.0)
+        for i in range(5):
+            r.atualizar([caixa(0.1, w=0.1, h=0.3)], i * 0.08)
+        r.atualizar([], 0.5)
+        pistas = r.atualizar([caixa(0.9, w=0.1, h=0.3)], 0.6)
+        ids = {p.id for p in pistas}
+        self.assertNotIn(1, [p.id for p in pistas if p.visivel])
+
+    def test_pessoa_pequena_e_distante_e_aceita(self):
+        r = Rastreador()
+        r.atualizar([caixa(0.5, w=0.05, h=0.15, conf=0.40)], 0.0)
+        pistas = r.atualizar([caixa(0.5, w=0.05, h=0.15, conf=0.40)], 0.08)
+        self.assertEqual(len(pistas), 1)
 
 
 class TesteRastreador(unittest.TestCase):

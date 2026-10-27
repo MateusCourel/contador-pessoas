@@ -18,6 +18,7 @@ from gestos import LIGACOES_DA_MAO
 
 LARG, ALT = 1920, 1080
 CAM_X, CAM_Y, CAM_W, CAM_H = 30, 110, 1260, 709        # área da câmera (16:9)
+FAIXA_Y = (826, 994)    # faixa de baixo, onde a barra e o contorno animam
 SUBTITULO = "Fatec Botucatu · 15ª Jornacitec"
 
 # cores (RGB)
@@ -88,29 +89,82 @@ class Painel:
                    dict(titulo=46, sub=26, rot=26, g=190, m=110, p=72,
                         texto=36, chip=30, banner=62, banner2=34).items()}
         self._f["fino"] = _fonte(28, negrito=False)
-        self._chave = None
+        self._chave = {}
         self._estatico = None
+        self._pil = None
         self._buf = None
+        self._sujo_faixa = False
         self._rotulos = {}
 
-    # ---------- parte estática (re-desenhada no máximo 1x por segundo) ----
-    def _desenhar_estatico(self, dados, modo, cadastro=None):
-        img = Image.new("RGB", (LARG, ALT), FUNDO)
-        d = ImageDraw.Draw(img)
-        f = self._f
+    # ---------- parte estática, em quatro regiões independentes ----------
+    # Cada região só é redesenhada quando o que ela mostra muda (a barra de
+    # desempenho muda 1x por segundo; os cartões, só quando alguém entra ou
+    # sai). Antes a tela inteira era refeita a cada mudança, o que travava
+    # o vídeo por um instante todo segundo.
+    R_TOPO = (0, 0, LARG, 105)
+    R_CARTOES = (1310, 105, 1900, 995)
+    R_CONVITE = (20, 826, 1300, 994)
+    R_BARRA = (20, 1000, 1900, 1070)
 
-        # barra do topo
+    def _chaves_das_regioes(self, dados, modo, cadastro):
+        fps, temp = dados.get("fps", 0.0), dados.get("temp", 0.0)
+        return {
+            "topo": (dados.get("hora", "--:--"),),
+            "cartoes": (dados.get("entraram", 0), dados.get("na_camera", 0),
+                        dados.get("sairam", 0), dados.get("dentro", 0),
+                        dados.get("lotacao_max"),
+                        tuple(dados.get("historico", [])[-30:])),
+            "convite": (modo, tuple(cadastro or ())),
+            "barra": (f"{fps:.1f}", f"{temp:.0f}",
+                      f"{dados.get('cpu', 0):.0f}", f"{dados.get('ram', 0):.0f}",
+                      f"{dados.get('latencia_ms', 0):.0f}",
+                      int(dados.get("uptime_s", 0))),
+        }
+
+    def _atualizar_regioes(self, dados, modo, cadastro):
+        """Redesenha só as regiões cujo conteúdo mudou e copia o resultado
+        para o quadro de imagem pronto. Devolve True se algo mudou."""
+        chaves = self._chaves_das_regioes(dados, modo, cadastro)
+        if self._pil is None:
+            self._pil = Image.new("RGB", (LARG, ALT), FUNDO)
+            d = ImageDraw.Draw(self._pil)
+            d.rectangle((CAM_X - 3, CAM_Y - 3, CAM_X + CAM_W + 2,
+                         CAM_Y + CAM_H + 2), outline=BORDA, width=3)
+            self._estatico = np.asarray(self._pil)[:, :, ::-1].copy()
+            self._buf = None
+            self._chave = {}
+        desenhar = {"topo": self._reg_topo, "cartoes": self._reg_cartoes,
+                    "convite": self._reg_convite, "barra": self._reg_barra}
+        caixas = {"topo": self.R_TOPO, "cartoes": self.R_CARTOES,
+                  "convite": self.R_CONVITE, "barra": self.R_BARRA}
+        mudou = False
+        for nome, chave in chaves.items():
+            if self._chave.get(nome) == chave:
+                continue
+            self._chave[nome] = chave
+            caixa = caixas[nome]
+            x0, y0, x1, y1 = caixa
+            d = ImageDraw.Draw(self._pil)
+            d.rectangle((x0, y0, x1 - 1, y1 - 1), fill=FUNDO)
+            desenhar[nome](d, dados, modo, cadastro)
+            pedaco = np.asarray(self._pil.crop(caixa))[:, :, ::-1]
+            self._estatico[y0:y1, x0:x1] = pedaco
+            if self._buf is not None:
+                self._buf[y0:y1, x0:x1] = pedaco
+            mudou = True
+        return mudou
+
+    def _reg_topo(self, d, dados, modo, cadastro):
+        f = self._f
         d.text((30, 22), "CONTADOR DE PESSOAS", font=f["titulo"], fill=TEXTO)
         larg_titulo = d.textlength("CONTADOR DE PESSOAS", font=f["titulo"])
         d.text((30 + larg_titulo + 40, 52), SUBTITULO, font=f["sub"],
                fill=SUAVE, anchor="lm")
-        hora = dados.get("hora", "--:--")
-        d.text((LARG - 30, 22), hora, font=f["titulo"], fill=CIANO,
-               anchor="ra")
-        d.rectangle((CAM_X - 3, CAM_Y - 3, CAM_X + CAM_W + 2,
-                     CAM_Y + CAM_H + 2), outline=BORDA, width=3)
+        d.text((LARG - 30, 22), dados.get("hora", "--:--"), font=f["titulo"],
+               fill=CIANO, anchor="ra")
 
-        # coluna da direita
+    def _reg_cartoes(self, d, dados, modo, cadastro):
+        f = self._f
         x0, x1 = 1320, 1890
         _cartao(d, (x0, 110, x1, 345), "JÁ ENTRARAM", f["rot"])
         d.text((x0 + 285, 255), str(dados.get("entraram", 0)), font=f["g"],
@@ -134,8 +188,7 @@ class Painel:
                font=f["p"], fill=cor_dentro, anchor="mm")
 
         # gráfico das entradas recentes
-        _cartao(d, (x0, 720, x1, 985), "ENTRADAS POR MINUTO",
-                f["rot"])
+        _cartao(d, (x0, 720, x1, 985), "ENTRADAS POR MINUTO", f["rot"])
         hist = list(dados.get("historico", []))[-30:]
         gx0, gx1, gy0, gy1 = x0 + 30, x1 - 30, 775, 960
         d.line((gx0, gy1, gx1, gy1), fill=BORDA, width=2)
@@ -153,10 +206,11 @@ class Painel:
                    "coletando dados...", font=f["fino"], fill=SUAVE,
                    anchor="mm")
 
-        # faixa de convite (palma da mão)
+    def _reg_convite(self, d, dados, modo, cadastro):
         self._desenhar_convite(d, modo, cadastro)
 
-        # barra de desempenho
+    def _reg_barra(self, d, dados, modo, cadastro):
+        f = self._f
         d.rounded_rectangle((30, 1005, 1890, 1065), radius=18, fill=CARTAO,
                             outline=BORDA, width=2)
         fps, temp = dados.get("fps", 0.0), dados.get("temp", 0.0)
@@ -179,7 +233,6 @@ class Painel:
             d.text((x + larg_nome + 14, 1035), valor, font=f["chip"],
                    fill=cor, anchor="lm")
             x += int(larg_nome + 14 + d.textlength(valor, font=f["chip"])) + 70
-        return np.asarray(img)[:, :, ::-1].copy()          # RGB -> BGR
 
     def _ajustar(self, d, texto, largura_max, tamanho, negrito=True):
         """Fonte do tamanho pedido, diminuída até o texto caber."""
@@ -246,19 +299,21 @@ class Painel:
         barra: progresso 0-1 desenhado na faixa (None = sem barra).
         mao: (pontos_da_mao, progresso) da pessoa da frente: desenha o
         esqueleto verde com pontos vermelhos e um anel de progresso."""
-        chave = (modo, tuple(cadastro or ()), tuple(sorted((k, round(v, 1) if isinstance(v, float)
-                                     else tuple(v) if isinstance(v, list)
-                                     else v) for k, v in dados.items())))
-        if chave != self._chave:
-            self._estatico = self._desenhar_estatico(dados, modo, cadastro)
-            self._chave = chave
-        if self._buf is None or self._buf.shape != self._estatico.shape:
-            self._buf = np.empty_like(self._estatico)
-        np.copyto(self._buf, self._estatico)
+        self._atualizar_regioes(dados, modo, cadastro)
+        if self._buf is None:
+            self._buf = self._estatico.copy()      # única cópia inteira
+            self._sujo_faixa = False
+        elif self._sujo_faixa:
+            # o quadro da câmera é recolado inteiro a cada vez; só a faixa de
+            # baixo (barra / contorno que pulsa) precisa voltar ao original
+            y0, y1 = FAIXA_Y
+            self._buf[y0:y1] = self._estatico[y0:y1]
         quadro = self._buf
 
-        cam = cv2.resize(camera_bgr, (CAM_W, CAM_H),
-                         interpolation=cv2.INTER_LINEAR)
+        # a câmera é redimensionada direto dentro do quadro (sem cópia extra)
+        cam = quadro[CAM_Y:CAM_Y + CAM_H, CAM_X:CAM_X + CAM_W]
+        cv2.resize(camera_bgr, (CAM_W, CAM_H), dst=cam,
+                   interpolation=cv2.INTER_LINEAR)
         if linha:
             (ax, ay), (bx, by) = linha
             p, q = (int(ax * CAM_W), int(ay * CAM_H)), \
@@ -268,16 +323,18 @@ class Painel:
             self._marcar(cam, pessoa)
         if mao:
             self._desenhar_mao(cam, *mao)
-        quadro[CAM_Y:CAM_Y + CAM_H, CAM_X:CAM_X + CAM_W] = cam
 
+        self._sujo_faixa = False
         if barra is not None and modo == "cadastro":
             x0, x1, y = 60, 1260, 964
+            self._sujo_faixa = True
             cv2.rectangle(quadro, (x0, y), (x1, y + 12), (82, 52, 38), -1)
             cv2.rectangle(quadro, (x0, y),
                           (x0 + int((x1 - x0) * min(max(barra, 0), 1)), y + 12),
                           (36, 191, 251), -1)
 
         if modo == "convite":        # contorno que pulsa para chamar atenção
+            self._sujo_faixa = True
             espessura = 3 + int(3 * (0.5 + 0.5 * np.sin(t * 5)))
             cv2.rectangle(quadro, (30, 835), (1290, 985), (238, 211, 34),
                           espessura, cv2.LINE_AA)

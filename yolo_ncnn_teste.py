@@ -6,6 +6,7 @@ o tempo por quadro e salva a última imagem com as caixas em
 
 Rodar:   python yolo_ncnn_teste.py
 """
+import argparse
 import time
 
 import cv2
@@ -15,7 +16,13 @@ from deteccao import DetectorDePessoas
 
 
 def main():
-    detector = DetectorDePessoas("yolo11n_ncnn_model")
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--yolo", default="yolo11n_ncnn_model")
+    ap.add_argument("--threads", type=int, default=3)
+    args = ap.parse_args()
+    detector = DetectorDePessoas(args.yolo, threads=args.threads)
+    print(f"Modelo {args.yolo}: entrada {detector.tamanho[0]}x"
+          f"{detector.tamanho[1]}")
     cam = Camera(largura=1280, altura=720, preferir="csi")
     tempos, ultimo, ultimas = [], None, []
     fim = time.time() + 5

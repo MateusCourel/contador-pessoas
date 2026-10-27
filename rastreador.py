@@ -31,6 +31,9 @@ def iou(a, b):
     return inter / uniao if uniao > 0 else 0.0
 
 
+ASPECTO = 16 / 9      # x normalizado vale mais pixels que y normalizado
+
+
 @dataclass
 class Pista:
     """Uma pessoa rastreada."""
@@ -42,6 +45,7 @@ class Pista:
     confirmada: bool = False
     ultima_vez: float = 0.0
     vel: tuple = (0.0, 0.0)  # deslocamento por segundo do centro (x, y)
+    criada_em: float = 0.0   # instante em que a pista nasceu
 
     @property
     def centro(self):
@@ -60,14 +64,19 @@ class Pista:
 
 
 class Rastreador:
-    def __init__(self, conf_alta=0.35, conf_nova=0.45, iou_minimo=0.25,
-                 iou_minimo_fraca=0.45, confirmar=2, guardar_s=1.5):
+    def __init__(self, conf_alta=0.30, conf_nova=0.38, iou_minimo=0.25,
+                 iou_minimo_fraca=0.45, confirmar=2, guardar_s=2.0,
+                 iou_duplicata=0.5, resgate=True):
         """
         conf_alta:  a partir daqui a detecção é "forte"
         conf_nova:  confiança mínima para abrir uma pessoa nova
         iou_minimo: sobreposição mínima para ligar detecção forte a pessoa
         confirmar:  quadros seguidos até a pessoa nova ser confirmada
         guardar_s:  quanto tempo guarda quem sumiu (para manter o ID)
+        iou_duplicata: detecção nova que se sobrepõe a uma pessoa já
+                    rastreada mais que isso é a mesma pessoa (não cria ID)
+        resgate:    religa quem sumiu e reapareceu mais longe (andou rápido
+                    ou ficou atrás de alguém) pela distância do centro
         """
         self.conf_alta = conf_alta
         self.conf_nova = conf_nova
@@ -75,6 +84,8 @@ class Rastreador:
         self.iou_minimo_fraca = iou_minimo_fraca
         self.confirmar = confirmar
         self.guardar_s = guardar_s
+        self.iou_duplicata = iou_duplicata
+        self.resgate = resgate
         self._pistas = []
         self._proximo_id = 1
 
@@ -123,6 +134,39 @@ class Rastreador:
         if pista.acertos >= self.confirmar:
             pista.confirmada = True
 
+    def _resgatar(self, soltas, idx, candidatas, agora):
+        """Liga pistas confirmadas que ficaram sem detecção a detecções soltas
+        próximas de onde a pessoa deveria estar. Devolve [(i_pista, j_det)]."""
+        opcoes = []
+        for i in soltas:
+            p = idx[i]
+            if not p.confirmada:
+                continue
+            dt = min(max(agora - p.ultima_vez, 0.0), 1.0)
+            cx, cy = p.centro
+            px, py = cx + p.vel[0] * dt, cy + p.vel[1] * dt
+            alt = p.altura
+            if alt <= 0:
+                continue
+            for j, d in candidatas:
+                dalt = d[3] - d[1]
+                if dalt <= 0 or not 0.5 <= dalt / alt <= 2.0:
+                    continue
+                dx = ((d[0] + d[2]) / 2 - px) * ASPECTO
+                dy = (d[1] + d[3]) / 2 - py
+                dist = (dx * dx + dy * dy) ** 0.5
+                if dist <= 0.45 * alt + 0.03:
+                    opcoes.append((dist, i, j))
+        opcoes.sort()
+        pistas_usadas, dets_usadas, pares = set(), set(), []
+        for _, i, j in opcoes:
+            if i in pistas_usadas or j in dets_usadas:
+                continue
+            pistas_usadas.add(i)
+            dets_usadas.add(j)
+            pares.append((i, j))
+        return pares
+
     # ---------- uso ----------
     def atualizar(self, deteccoes, agora):
         """deteccoes: lista de (x0, y0, x1, y1, conf) normalizadas.
@@ -145,24 +189,40 @@ class Rastreador:
             vistas.add(i)
 
         # segunda chance: detecções fracas para quem sobrou
-        pares2, soltas, _ = self._ligar(soltas, fracas, prev_i,
-                                        self.iou_minimo_fraca)
+        pares2, soltas, fracas_soltas = self._ligar(soltas, fracas, prev_i,
+                                                    self.iou_minimo_fraca)
         for i, j in pares2:
             self._atualizar_pista(idx[i], deteccoes[j], agora)
             vistas.add(i)
+
+        # resgate: quem sumiu e reapareceu longe demais para o IoU pegar
+        if self.resgate and soltas:
+            candidatas = [(j, d) for j, d in fortes_soltas + fracas_soltas
+                          if d[4] >= 0.2]
+            usadas = set()
+            for i, j in self._resgatar(soltas, idx, candidatas, agora):
+                self._atualizar_pista(idx[i], deteccoes[j], agora)
+                vistas.add(i)
+                usadas.add(j)
+            soltas = [i for i in soltas if i not in vistas]
+            fortes_soltas = [(j, d) for j, d in fortes_soltas
+                             if j not in usadas]
 
         for i in soltas:
             idx[i].visivel = False
             if not idx[i].confirmada:
                 idx[i].acertos = 0           # vulto que falhou: recomeça
 
-        # pessoas novas
+        # pessoas novas (sem duplicar quem já está sendo rastreado)
         for _, d in fortes_soltas:
             if d[4] < self.conf_nova:
                 continue
+            if any(p.visivel and iou(p.caixa, d[:4]) >= self.iou_duplicata
+                   for p in self._pistas):
+                continue
             self._pistas.append(Pista(
                 id=self._proximo_id, caixa=tuple(d[:4]), conf=d[4],
-                visivel=True, acertos=1, ultima_vez=agora,
+                visivel=True, acertos=1, ultima_vez=agora, criada_em=agora,
                 confirmada=self.confirmar <= 1))
             self._proximo_id += 1
 

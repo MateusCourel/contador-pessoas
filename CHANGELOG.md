@@ -58,3 +58,25 @@
 
 ## v0.6.4
 - organizar_telas.py: ao abrir, identifica o touch (modo 1280x800) e a TV pelo que são, não pela porta HDMI; força touch 1280x800 em 0,0 e TV 1920x1080@60 em 1280,0 (wlr-randr) e corrige o toque no wayfire.ini (cópia em wayfire.ini.bak). Resolve TV em 4K/portas trocadas. Opção --nao-organizar-telas desliga.
+
+## v0.7 (testado em sala de aula)
+**Contagem na porta**
+- Quem só é detectado depois de já ter passado da linha (pessoa pequena/longe) agora conta: pista nova que nasce a até 22% da linha e se afasta 6% é contada como entrada/saída (só depois de 3 s do programa abrir; desligue com `"inferir_nascimento": false` em dados/config.json). O resumo de desempenho mostra quantas entradas foram inferidas.
+- Rastreador: sem criar ID duplicado para a mesma pessoa (IoU ≥ 0,5), resgate de quem sumiu e reapareceu longe (pela distância do centro), guarda a pista por 2 s, NMS menos agressivo (0,6) para grupos juntos na porta.
+
+**Detecção à distância**
+- Limiares do rastreador mais sensíveis (pessoa nova a partir de 0,38; ligação a partir de 0,30).
+- Redução da imagem com INTER_AREA (mais detalhe de quem está longe).
+- Suporte a modelo YOLO retangular (ex.: 448x256), lendo o tamanho do metadata.yaml. `exportar_yolo.py` gera o modelo; `--yolo-tamanho LxA` força o tamanho.
+
+**Reconhecimento**
+- A TV mostra a porcentagem: `Mateus Courel · 78%` (50% = limite de aceitação, 99% = muito parecido; é uma escala de semelhança, não probabilidade).
+- Um nome nunca aparece em duas pessoas ao mesmo tempo (fica quem tem a maior nota); quem perde o nome fica proibido de usá-lo.
+- Critério mais rígido: média das 2 melhores poses ≥ 0,42, melhor pose ≥ 0,50 e vantagem de 0,06 sobre o 2º colocado do banco.
+- Só reconhece rosto de frente e grande; reverifica a cada 2,5 s (a % acompanha o rosto) e solta o nome após 3 erros seguidos.
+- Banco com cache em memória (uma multiplicação de matrizes por rosto).
+
+**FPS**
+- Painel redesenhado por regiões (a barra de desempenho muda 1x/s sem refazer a tela toda; cartões só quando a contagem muda); câmera redimensionada direto no quadro.
+- Tela touch só é reenviada à janela quando mudou.
+- Rosto, embedding e gesto nunca no mesmo quadro; gesto só de quem está perto.

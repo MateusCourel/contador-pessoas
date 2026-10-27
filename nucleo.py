@@ -16,7 +16,8 @@ from estatisticas import (HistoricoPorMinuto, MediaMovel, MedidorDeCpu,
 from mao import mao_da_pessoa, pessoa_da_frente
 from fluxo import CALIBRAR, ESPERA, FIM, NOME, POSES_, FluxoDeCadastro
 from gestos import GESTO_MAO_ABERTA, GatilhoPorTempo
-from identidades import (LIMITE_EXIBIR_NOME, GerenteDeIdentidades,
+from poses import razoes_da_cabeca
+from identidades import (GerenteDeIdentidades, decidir, rosto_de_frente,
                          associar_rostos, largura_do_rosto)
 from rastreador import Rastreador
 
@@ -26,6 +27,11 @@ COR_DESCONHECIDO = (34, 211, 238)    # ciano
 COR_CADASTRANDO = (251, 191, 36)     # amarelo
 INTERVALO_TOUCH_S = 0.10             # a tela touch muda pouco: ~10 quadros/s
 INTERVALO_ROSTO_S = 0.15             # rosto no dia a dia: ~6 vezes por segundo
+INTERVALO_ROSTO_MUITOS_S = 0.40      # com 3+ candidatos a reconhecer
+ALTURA_MIN_RECONHECER = 0.35         # só procura rosto de quem está perto
+ESPERA_SEM_ROSTO_S = 1.2             # não achou rosto útil: tenta mais tarde
+ALTURA_MIN_GESTO = 0.40              # gesto só de quem está perto
+MARGEM_PARA_ROUBAR_NOME = 0.05       # nota extra p/ tirar um nome de outra pessoa
 INTERVALO_GESTO_LENTO_S = 0.25       # procurando a mão: ~4 vezes por segundo
 INTERVALO_GESTO_RAPIDO_S = 0.08      # mão à vista: ~12 vezes por segundo
 MAO_ATIVA_S = 1.5                    # tempo em modo rápido depois de ver a mão
@@ -64,6 +70,8 @@ class Nucleo:
         self.linha_y = float(config.obter("linha_y", 0.5))
         self.inverter = bool(config.obter("inverter", False))
         self.contador = ContadorDeEntradas(*self._linha(), self.inverter)
+        self.contador.inferir_nascimento = bool(
+            config.obter("inferir_nascimento", True))
 
         self._pistas = []
         self._pid_cadastro = None
@@ -79,6 +87,9 @@ class Nucleo:
         self._sistema_ate = -1e9
         self._img_touch = None
         self._touch_ate = -1e9
+        # tempo gasto (ms, média móvel) em cada parte, para o log
+        self.tempos = {k: MediaMovel(alpha=0.1)
+                       for k in ("rosto", "gesto", "tv", "touch")}
 
     # ---------- linha de contagem ----------
     def _linha(self):
@@ -148,38 +159,69 @@ class Nucleo:
         # 2) rostos: no cadastro a cada quadro; no dia a dia só de vez em
         # quando e só se alguém ainda precisa ser reconhecido (economiza CPU)
         rostos = []
+        candidatos = []
+        rodou_rosto = False
+        pesado = False                   # já fez trabalho pesado neste quadro
+        t0 = time.perf_counter()
         if self.fluxo.ativo:
             rostos = self.rosto.detectar_todos(frame)
-        elif agora - self._ultimo_rosto_t >= INTERVALO_ROSTO_S and any(
-                self.identidades.precisa_tentar(p.id, agora)
-                for p in visiveis):
-            self._ultimo_rosto_t = agora
-            rostos = self.rosto.detectar_todos(frame)
+            pesado = True
+        else:
+            # só quem está perto o bastante para ter um rosto reconhecível
+            candidatos = [p for p in visiveis
+                          if p.altura >= ALTURA_MIN_RECONHECER
+                          and self.identidades.precisa_tentar(p.id, agora)]
+            intervalo = (INTERVALO_ROSTO_MUITOS_S if len(candidatos) >= 3
+                         else INTERVALO_ROSTO_S)
+            if candidatos and agora - self._ultimo_rosto_t >= intervalo:
+                self._ultimo_rosto_t = agora
+                rostos = self.rosto.detectar_todos(frame)
+                rodou_rosto = True
+                pesado = True
+        if rodou_rosto or rostos:
+            self.tempos["rosto"].somar((time.perf_counter() - t0) * 1000)
         caixas = {p.id: p.caixa for p in visiveis}
         rosto_de = associar_rostos(rostos, caixas)
+        if rodou_rosto:
+            for p in candidatos:                 # sem rosto útil: espera
+                pts = rosto_de.get(p.id)
+                if pts is None or largura_do_rosto(pts, w) < LARGURA_MINIMA:
+                    self.identidades.adiar(p.id, agora, ESPERA_SEM_ROSTO_S)
 
         # 3) entradas e saídas
-        eventos = self.contador.atualizar({p.id: p.pes for p in self._pistas})
+        eventos = self.contador.atualizar(
+            {p.id: p.pes for p in self._pistas}, agora,
+            {p.id: agora - p.criada_em for p in self._pistas})
         for pid, ev in eventos:
             if ev == "entrou":
                 self.historico.registrar(time.time())
             if self.registro:
                 self.registro.escrever(ev, pid)
 
-        # 4) reconhecimento (no máximo uma pessoa por quadro)
+        # 4) reconhecimento (no máximo uma pessoa por quadro): só rosto de
+        # frente e grande; um nome nunca vale para duas pessoas ao mesmo tempo
         if not self.fluxo.ativo:
             for pid, pontos in rosto_de.items():
                 if not self.identidades.precisa_tentar(pid, agora):
                     continue
-                if largura_do_rosto(pontos, w) < LARGURA_MINIMA:
+                if largura_do_rosto(pontos, w) < LARGURA_MINIMA or \
+                        not rosto_de_frente(razoes_da_cabeca(pontos)):
+                    self.identidades.adiar(pid, agora, ESPERA_SEM_ROSTO_S / 3)
                     continue
                 emb = self.extrair(frame, pontos)
+                pesado = True
                 if emb is None:
                     continue
-                nome, sim = self.banco.identificar(
-                    emb, limite=LIMITE_EXIBIR_NOME)
-                self.identidades.registrar(pid, nome, sim, agora)
+                nome, nota = decidir(self.banco.ranking(emb),
+                                     self.identidades.negados(pid))
+                if nome is not None:
+                    dono = self.identidades.dono_do_nome(nome, menos_pid=pid)
+                    if dono is not None and dono[0] in caixas and \
+                            nota < dono[1] + MARGEM_PARA_ROUBAR_NOME:
+                        nome = None          # já é de outra pessoa na tela
+                self.identidades.registrar(pid, nome, nota, agora)
                 break
+        self.identidades.resolver_unicidade({p.id for p in visiveis})
         self.identidades.esquecer_ausentes({p.id for p in self._pistas})
 
         # 5) cadastro: gesto, toque, teclado e o passo da máquina de estados
@@ -188,14 +230,19 @@ class Nucleo:
         self._tratar_tecla(tecla, agora)
 
         frente = pessoa_da_frente(visiveis)
+        # (gesto só de quem está perto, e nunca no mesmo quadro de outro
+        # trabalho pesado: espalha o custo e evita travadinhas)
         if self.fluxo.estado == ESPERA and self.gestos is not None and \
-                frente is not None:
+                frente is not None and frente.altura >= ALTURA_MIN_GESTO and \
+                not pesado:
             intervalo = (INTERVALO_GESTO_RAPIDO_S
                          if agora - self._mao_t < MAO_ATIVA_S
                          else INTERVALO_GESTO_LENTO_S)
             if agora - self._ultimo_gesto_t >= intervalo:
                 self._ultimo_gesto_t = agora
+                tg = time.perf_counter()
                 res = self.gestos.detectar(frame)
+                self.tempos["gesto"].somar((time.perf_counter() - tg) * 1000)
                 gesto = res[0] if res else None
                 pontos = getattr(self.gestos, "pontos", None)
                 # só vale a mão de quem está na frente (a de maior caixa)
@@ -208,7 +255,8 @@ class Nucleo:
                     ativo, agora)
                 if disparou:
                     self.fluxo.iniciar(agora)
-        elif self.fluxo.ativo or frente is None:
+        elif self.fluxo.ativo or frente is None or \
+                frente.altura < ALTURA_MIN_GESTO:
             self._mao = None
             self._progresso_palma = 0.0
 
@@ -223,7 +271,7 @@ class Nucleo:
         self.fluxo.passo(frame, rosto_cadastro, agora)
         novo = self.fluxo.pop_cadastrado()
         if novo and self._pid_cadastro is not None:
-            self.identidades.definir(self._pid_cadastro, novo)
+            self.identidades.definir(self._pid_cadastro, novo, agora=agora)
 
         # 6) o que mostrar
         pessoas = self._pessoas_para_mostrar(visiveis, rosto_de,
@@ -244,10 +292,12 @@ class Nucleo:
         if self._mao is not None and agora - self._mao_t < MAO_VISIVEL_S \
                 and not self.fluxo.ativo:
             mao_tv = (self._mao, self._progresso_palma)
+        tt = time.perf_counter()
         tv = self.painel.compor(frame, dados, pessoas, modo=modo,
                                 t=agora - self._inicio,
                                 linha=(a, b) if LINHA_NA_TV else None,
                                 cadastro=cadastro, barra=barra, mao=mao_tv)
+        self.tempos["tv"].somar((time.perf_counter() - tt) * 1000)
 
         tocou = toque is not None or tecla not in (None, -1, 255)
         if tocou or self._img_touch is None or agora >= self._touch_ate:
@@ -264,11 +314,23 @@ class Nucleo:
                 "poses_feitas": self.fluxo.poses_feitas,
                 "pose_atual": self.fluxo.pose_atual,
             }
+            tt = time.perf_counter()
             self._img_touch = self.console.desenhar(
                 vm, agora, teclado=self.fluxo.teclado,
                 mostrar_linha=agora < self._guia_ate)
+            self.tempos["touch"].somar((time.perf_counter() - tt) * 1000)
             self._touch_ate = agora + INTERVALO_TOUCH_S
         return tv, self._img_touch
+
+    def resumo_de_desempenho(self, pessoas):
+        t = {k: int(v.valor) for k, v in self.tempos.items()}
+        return (f"[desempenho] {self._fps.valor:.1f} FPS | pessoas {pessoas} | "
+                f"rosto {t['rosto']} ms | gesto {t['gesto']} ms | "
+                f"tv {t['tv']} ms | touch {t['touch']} ms | "
+                f"yolo {self.latencia_ms:.0f} ms | "
+                f"entradas {self.contador.entraram} "
+                f"(inferidas {self.contador.inferidos}) "
+                f"saídas {self.contador.sairam}")
 
     # ---------- partes ----------
     def _pessoas_para_mostrar(self, visiveis, rosto_de, rosto_cadastro,
@@ -281,7 +343,7 @@ class Nucleo:
             if cadastrando:
                 rotulo, cor = "Cadastrando…", COR_CADASTRANDO
             else:
-                rotulo = self.identidades.rotulo(p.id)
+                rotulo = self.identidades.rotulo_com_confianca(p.id)
                 cor = (COR_CONHECIDO if self.identidades.conhecido(p.id)
                        else COR_DESCONHECIDO)
             # entre uma detecção e outra (o YOLO roda ~12x por segundo), a
