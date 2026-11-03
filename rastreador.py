@@ -31,6 +31,10 @@ def iou(a, b):
     return inter / uniao if uniao > 0 else 0.0
 
 
+# v0.7.1: ligação por IoU abaixo disso é "duvidosa" (pode ser outra pessoa)
+IOU_DUVIDOSO = 0.35
+
+
 ASPECTO = 16 / 9      # x normalizado vale mais pixels que y normalizado
 
 
@@ -46,6 +50,8 @@ class Pista:
     ultima_vez: float = 0.0
     vel: tuple = (0.0, 0.0)  # deslocamento por segundo do centro (x, y)
     criada_em: float = 0.0   # instante em que a pista nasceu
+    salto_em: float = -1e9   # v0.7.1: pista religada de longe (resgate)
+    duvida_em: float = -1e9  # v0.7.1: ligação fraca, pode ser outra pessoa
 
     @property
     def centro(self):
@@ -185,6 +191,8 @@ class Rastreador:
                                                    self.iou_minimo)
         vistas = set()
         for i, j in pares:
+            if iou(prev_i[i], deteccoes[j][:4]) < IOU_DUVIDOSO:
+                idx[i].duvida_em = agora
             self._atualizar_pista(idx[i], deteccoes[j], agora)
             vistas.add(i)
 
@@ -201,6 +209,7 @@ class Rastreador:
                           if d[4] >= 0.2]
             usadas = set()
             for i, j in self._resgatar(soltas, idx, candidatas, agora):
+                idx[i].salto_em = agora
                 self._atualizar_pista(idx[i], deteccoes[j], agora)
                 vistas.add(i)
                 usadas.add(j)

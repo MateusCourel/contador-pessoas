@@ -21,8 +21,12 @@ MARGEM_ENTRE_PESSOAS = 0.06     # vantagem sobre o 2º colocado do banco
 LIMITE_EXIBIR_NOME = LIMITE_MAXIMA          # (nome antigo, mantido)
 NOTA_EXCELENTE = 0.75           # daqui para cima mostra 99%
 
+# v0.7.1: quanto tempo um nome vale sem o rosto ser conferido de novo
+NOME_FRESCO_S = 4.0             # até aqui: "Nome · 78%"
+NOME_SOLTAR_S = 20.0            # depois disso o nome é solto
+
 # só tenta reconhecer rosto de frente (de lado o embedding engana)
-YAW_FRENTE = (0.30, 0.70)       # 0,5 = de frente
+YAW_FRENTE = (0.27, 0.73)       # 0,5 = de frente
 PITCH_FRENTE = (0.42, 0.80)     # 0,6 = de frente
 
 
@@ -112,7 +116,7 @@ class GerenteDeIdentidades:
             "nome": None, "sim": 0.0, "ultimo": None, "sequencia": 0,
             "candidato": None, "tentativas": 0, "proxima": 0.0,
             "travado": False, "notas": [], "votos_notas": [],
-            "falhas": 0, "negados": set()})
+            "falhas": 0, "negados": set(), "visto": 0.0})
 
     # ---------- consulta ----------
     def nome(self, pid):
@@ -137,10 +141,17 @@ class GerenteDeIdentidades:
     def rotulo(self, pid):
         return self.nome(pid) or f"Pessoa · ID {pid}"
 
-    def rotulo_com_confianca(self, pid):
+    def firme(self, pid, agora):
+        """Nome travado E conferido pelo rosto há pouco tempo."""
+        e = self._d.get(pid)
+        return bool(e and e["travado"] and agora - e["visto"] <= NOME_FRESCO_S)
+
+    def rotulo_com_confianca(self, pid, agora=None):
         nome = self.nome(pid)
         if nome is None:
             return f"Pessoa · ID {pid}"
+        if agora is not None and not self.firme(pid, agora):
+            return f"{nome} · ?"        # nome ainda não conferido
         return f"{nome} · {self.porcentagem(pid)}%"
 
     def negados(self, pid):
@@ -175,7 +186,7 @@ class GerenteDeIdentidades:
         e.update(nome=None, travado=False, candidato=None, sequencia=0,
                  notas=[], votos_notas=[], falhas=0, tentativas=0)
 
-    def registrar(self, pid, nome, sim, agora):
+    def registrar(self, pid, nome, sim, agora, votos=None):
         """Anota o resultado de uma tentativa (nome=None se desconhecido)."""
         e = self._estado(pid)
         e["tentativas"] += 1
@@ -183,6 +194,7 @@ class GerenteDeIdentidades:
         if e["travado"]:
             e["proxima"] = agora + self.reverificar_s
             if nome == e["nome"]:
+                e["visto"] = agora
                 e["falhas"] = 0
                 e["notas"] = (e["notas"] + [sim])[-4:]
             else:
@@ -202,8 +214,9 @@ class GerenteDeIdentidades:
         else:
             e["candidato"], e["sequencia"] = nome, (1 if nome else 0)
             e["votos_notas"] = [sim] if nome else []
-        if nome is not None and e["sequencia"] >= self.votos:
+        if nome is not None and e["sequencia"] >= (votos or self.votos):
             e["nome"], e["travado"] = nome, True
+            e["visto"] = agora
             e["notas"] = e["votos_notas"][-4:]
             e["falhas"] = 0
             e["proxima"] = agora + self.reverificar_s
@@ -213,8 +226,32 @@ class GerenteDeIdentidades:
         """Fixa a identidade (usado logo depois de um cadastro)."""
         e = self._estado(pid)
         e.update(nome=nome, sim=sim, travado=True, candidato=nome,
-                 sequencia=self.votos, notas=[sim], falhas=0,
+                 sequencia=self.votos, notas=[sim], falhas=0, visto=agora,
                  proxima=agora + self.reverificar_s)
+
+    def duvidar(self, pid, agora):
+        """Alguém passou na frente: o nome vira "?" até o rosto ser conferido."""
+        e = self._d.get(pid)
+        if e and e["travado"]:
+            e["visto"] = min(e["visto"], agora - NOME_FRESCO_S - 0.01)
+            e["proxima"] = min(e["proxima"], agora + 0.5)
+
+    def perder(self, pid, agora):
+        """A pista pulou de lugar: não dá para garantir quem é; recomeça."""
+        e = self._d.get(pid)
+        if e and e["travado"]:
+            self._destravar(e)
+            e["proxima"] = agora
+
+    def expirar(self, agora):
+        """Solta nomes que ficaram tempo demais sem o rosto ser conferido."""
+        soltos = []
+        for pid, e in self._d.items():
+            if e["travado"] and agora - e["visto"] > NOME_SOLTAR_S:
+                self._destravar(e)
+                e["proxima"] = agora
+                soltos.append(pid)
+        return soltos
 
     def resolver_unicidade(self, ids_visiveis):
         """Se o mesmo nome estiver em mais de uma pessoa visível, fica só

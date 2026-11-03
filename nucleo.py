@@ -7,6 +7,8 @@ Quem chama (principal.py) cuida da câmera, das janelas e do YOLO em segundo
 plano; o núcleo cuida da lógica: rastrear, contar, reconhecer, cadastrar e
 montar as duas telas.
 """
+# v0.7.1
+import inspect
 import time
 
 from contagem import ContadorDeEntradas
@@ -19,7 +21,7 @@ from gestos import GESTO_MAO_ABERTA, GatilhoPorTempo
 from poses import razoes_da_cabeca
 from identidades import (GerenteDeIdentidades, decidir, rosto_de_frente,
                          associar_rostos, largura_do_rosto)
-from rastreador import Rastreador
+from rastreador import Rastreador, iou
 
 PASSO_DA_LINHA = 0.02
 COR_CONHECIDO = (52, 211, 153)       # verde
@@ -28,7 +30,7 @@ COR_CADASTRANDO = (251, 191, 36)     # amarelo
 INTERVALO_TOUCH_S = 0.10             # a tela touch muda pouco: ~10 quadros/s
 INTERVALO_ROSTO_S = 0.15             # rosto no dia a dia: ~6 vezes por segundo
 INTERVALO_ROSTO_MUITOS_S = 0.40      # com 3+ candidatos a reconhecer
-ALTURA_MIN_RECONHECER = 0.35         # só procura rosto de quem está perto
+ALTURA_MIN_RECONHECER = 0.30         # só procura rosto de quem está perto
 ESPERA_SEM_ROSTO_S = 1.2             # não achou rosto útil: tenta mais tarde
 ALTURA_MIN_GESTO = 0.40              # gesto só de quem está perto
 MARGEM_PARA_ROUBAR_NOME = 0.05       # nota extra p/ tirar um nome de outra pessoa
@@ -37,6 +39,11 @@ INTERVALO_GESTO_RAPIDO_S = 0.08      # mão à vista: ~12 vezes por segundo
 MAO_ATIVA_S = 1.5                    # tempo em modo rápido depois de ver a mão
 MAO_VISIVEL_S = 0.35                 # esqueleto fica na tela este tempo
 GUIA_LINHA_S = 4.0                   # linha visível no touch após mexer nela
+LARGURA_RECONHECER = 64             # menor rosto (px) que ainda tenta reconhecer
+LARGURA_BOA = 90                    # abaixo disso o nome pede mais votos
+VOTOS_ROSTO_PEQUENO = 3
+IOU_SOBREPOSTO = 0.30               # alguém na frente de quem tem nome
+COR_INCERTO = (156, 163, 175)       # cinza: nome ainda não conferido
 LINHA_NA_TV = False                  # True = mostra a linha amarela na TV
 
 
@@ -66,6 +73,13 @@ class Nucleo:
         self._fps = MediaMovel(alpha=0.1)
         self.latencia_ms = 0.0
         self.sair = False
+        try:
+            self._extrair_aceita_minima = (
+                "minima" in inspect.signature(extrair).parameters)
+        except (TypeError, ValueError):
+            self._extrair_aceita_minima = False
+        self._n_cadastradas = 0
+        self._n_cadastradas_ate = -1e9
 
         self.linha_y = float(config.obter("linha_y", 0.5))
         self.inverter = bool(config.obter("inverter", False))
@@ -154,6 +168,7 @@ class Nucleo:
         # 1) rastreamento (só quando chegou uma detecção nova)
         if deteccoes is not None:
             self._pistas = self.rastreador.atualizar(deteccoes, agora)
+            self._cuidar_das_identidades(agora)
         visiveis = [p for p in self._pistas if p.visivel]
 
         # 2) rostos: no cadastro a cada quadro; no dia a dia só de vez em
@@ -185,7 +200,7 @@ class Nucleo:
         if rodou_rosto:
             for p in candidatos:                 # sem rosto útil: espera
                 pts = rosto_de.get(p.id)
-                if pts is None or largura_do_rosto(pts, w) < LARGURA_MINIMA:
+                if pts is None or largura_do_rosto(pts, w) < LARGURA_RECONHECER:
                     self.identidades.adiar(p.id, agora, ESPERA_SEM_ROSTO_S)
 
         # 3) entradas e saídas
@@ -204,11 +219,15 @@ class Nucleo:
             for pid, pontos in rosto_de.items():
                 if not self.identidades.precisa_tentar(pid, agora):
                     continue
-                if largura_do_rosto(pontos, w) < LARGURA_MINIMA or \
+                if largura_do_rosto(pontos, w) < LARGURA_RECONHECER or \
                         not rosto_de_frente(razoes_da_cabeca(pontos)):
                     self.identidades.adiar(pid, agora, ESPERA_SEM_ROSTO_S / 3)
                     continue
-                emb = self.extrair(frame, pontos)
+                larg = largura_do_rosto(pontos, w)
+                if self._extrair_aceita_minima:
+                    emb = self.extrair(frame, pontos, LARGURA_RECONHECER)
+                else:
+                    emb = self.extrair(frame, pontos)
                 pesado = True
                 if emb is None:
                     continue
@@ -219,7 +238,9 @@ class Nucleo:
                     if dono is not None and dono[0] in caixas and \
                             nota < dono[1] + MARGEM_PARA_ROUBAR_NOME:
                         nome = None          # já é de outra pessoa na tela
-                self.identidades.registrar(pid, nome, nota, agora)
+                self.identidades.registrar(
+                    pid, nome, nota, agora,
+                    votos=VOTOS_ROSTO_PEQUENO if larg < LARGURA_BOA else None)
                 break
         self.identidades.resolver_unicidade({p.id for p in visiveis})
         self.identidades.esquecer_ausentes({p.id for p in self._pistas})
@@ -270,6 +291,8 @@ class Nucleo:
             self._pid_cadastro = pid_cadastro
         self.fluxo.passo(frame, rosto_cadastro, agora)
         novo = self.fluxo.pop_cadastrado()
+        if novo:
+            self._n_cadastradas_ate = -1e9        # recontar os cadastros
         if novo and self._pid_cadastro is not None:
             self.identidades.definir(self._pid_cadastro, novo, agora=agora)
 
@@ -310,7 +333,7 @@ class Nucleo:
                 "inverter": self.inverter, "dentro": self.contador.dentro,
                 "entraram": self.contador.entraram,
                 "sairam": self.contador.sairam,
-                "cadastradas": len(self.banco.listar()),
+                "cadastradas": self._total_cadastrados(agora),
                 "poses_feitas": self.fluxo.poses_feitas,
                 "pose_atual": self.fluxo.pose_atual,
             }
@@ -321,6 +344,33 @@ class Nucleo:
             self.tempos["touch"].somar((time.perf_counter() - tt) * 1000)
             self._touch_ate = agora + INTERVALO_TOUCH_S
         return tv, self._img_touch
+
+    def _cuidar_das_identidades(self, agora):
+        """A cada detecção nova: o nome não pode "pular" para outra pessoa."""
+        ident = self.identidades
+        for p in self._pistas:
+            if p.salto_em >= agora:            # pista religada de longe
+                ident.perder(p.id, agora)
+            elif p.duvida_em >= agora:         # ligação fraca
+                ident.duvidar(p.id, agora)
+        if len(self._pistas) > 1:              # alguém passou na frente
+            for p in self._pistas:
+                if not p.visivel or ident.nome(p.id) is None:
+                    continue
+                for q in self._pistas:
+                    if q is not p and q.visivel and \
+                            iou(p.caixa, q.caixa) > IOU_SOBREPOSTO:
+                        ident.duvidar(p.id, agora)
+                        break
+        ident.expirar(agora)
+
+    def _total_cadastrados(self, agora):
+        """Conta os cadastros no máximo a cada 2 s (evita consultar o
+        banco a cada quadro da tela touch)."""
+        if agora >= self._n_cadastradas_ate:
+            self._n_cadastradas = len(self.banco.listar())
+            self._n_cadastradas_ate = agora + 2.0
+        return self._n_cadastradas
 
     def resumo_de_desempenho(self, pessoas):
         t = {k: int(v.valor) for k, v in self.tempos.items()}
@@ -343,9 +393,13 @@ class Nucleo:
             if cadastrando:
                 rotulo, cor = "Cadastrando…", COR_CADASTRANDO
             else:
-                rotulo = self.identidades.rotulo_com_confianca(p.id)
-                cor = (COR_CONHECIDO if self.identidades.conhecido(p.id)
-                       else COR_DESCONHECIDO)
+                rotulo = self.identidades.rotulo_com_confianca(p.id, agora)
+                if self.identidades.firme(p.id, agora):
+                    cor = COR_CONHECIDO
+                elif self.identidades.conhecido(p.id):
+                    cor = COR_INCERTO
+                else:
+                    cor = COR_DESCONHECIDO
             # entre uma detecção e outra (o YOLO roda ~12x por segundo), a
             # caixa continua andando com a velocidade da pessoa
             dt = min(max(agora - p.ultima_vez, 0.0), 0.12)

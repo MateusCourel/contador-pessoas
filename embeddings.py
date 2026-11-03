@@ -28,7 +28,7 @@ def _meio(pontos, a, b, w, h):
             (pontos[a][1] + pontos[b][1]) / 2 * h)
 
 
-def face_para_sface(pontos, largura, altura):
+def face_para_sface(pontos, largura, altura, minima=LARGURA_MINIMA):
     """Monta o vetor de 15 números que o SFace espera: caixa (x, y, w, h),
     5 pontos (olho, olho, nariz, boca, boca) e um valor de confiança.
 
@@ -39,7 +39,7 @@ def face_para_sface(pontos, largura, altura):
     ys = [p[1] * altura for p in pontos]
     x0, y0 = min(xs), min(ys)
     cx, cy = max(xs) - x0, max(ys) - y0
-    if cx < LARGURA_MINIMA:
+    if cx < minima:   # v0.7.1: o reconhecimento pode pedir menos que o cadastro
         return None
     olho_e = _meio(pontos, *OLHO_ESQ, largura, altura)
     olho_d = _meio(pontos, *OLHO_DIR, largura, altura)
@@ -54,10 +54,10 @@ class ExtratorDeEmbedding:
     def __init__(self, caminho_modelo="face_recognition_sface_2021dec.onnx"):
         self._modelo = cv2.FaceRecognizerSF_create(caminho_modelo, "")
 
-    def extrair(self, frame_bgr, pontos):
+    def extrair(self, frame_bgr, pontos, minima=LARGURA_MINIMA):
         """Devolve o embedding (128 números, já normalizado) ou None."""
         h, w = frame_bgr.shape[:2]
-        face = face_para_sface(pontos, w, h)
+        face = face_para_sface(pontos, w, h, minima)
         if face is None:
             return None
         alinhado = self._modelo.alignCrop(frame_bgr, face)
