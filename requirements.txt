@@ -1,5 +1,7 @@
+﻿numpy
 mediapipe
-numpy
 ncnn
 pillow
-# picamera2 e opencv vêm do sistema (sudo apt install python3-picamera2 python3-opencv)
+evdev
+# opencv e picamera2 vêm do sistema: sudo apt install python3-opencv python3-picamera2
+# ultralytics só é necessário para exportar o modelo YOLO (yolo_teste.py / exportar_yolo.py)

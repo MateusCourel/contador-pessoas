@@ -1,249 +1,192 @@
-# Contador de Pessoas — projeto base (Raspberry Pi 5)
+# Contador de Pessoas com Reconhecimento Facial
 
-Etapas prontas nesta versão:
+Sistema embarcado que **conta quem entra e sai de uma sala** e, de forma opcional e consentida, **reconhece pessoas cadastradas**, tudo em tempo real num **Raspberry Pi 5**, sem GPU e sem guardar nenhuma foto.
 
-| Arquivo | O que faz |
+Projeto desenvolvido para a **15ª Jornacitec** (Fatec Botucatu, 3 a 6 de novembro de 2026).
+
+> **Status:** versão **v0.7.1**. A lógica passou nos 232 testes automáticos. As melhorias mais recentes (contagem na porta e confiabilidade dos nomes) ainda estão em validação em sala de aula. Veja [Limitações e o que ainda não foi medido](#limitações-e-o-que-ainda-não-foi-medido).
+
+📄 Explicação para quem não é da área: [`docs/explicacao_simples.pdf`](docs/explicacao_simples.pdf)
+
+---
+
+## O que ele faz
+
+- **Conta entradas e saídas** por uma linha virtual na porta, com histerese para não contar duas vezes.
+- **Acompanha cada pessoa** com um ID estável (rastreador próprio).
+- **Cadastro por gesto e toque:** o visitante abre a palma da mão por 1 s, segue o guia de 5 poses da cabeça e digita o nome num teclado virtual.
+- **Reconhece pessoas cadastradas** e mostra `Nome · 78%` (semelhança com o cadastro). Um mesmo nome nunca aparece em duas pessoas ao mesmo tempo, e o nome fica `?` quando o rosto não é conferido há alguns segundos.
+- **Duas telas:** uma TV com o painel público e um monitor touch de 8" para o cadastro.
+- **Privacidade:** só guarda embeddings (128 números por pose). Nenhuma foto ou vídeo é gravado.
+
+## Como funciona
+
+![Fluxo do sistema](docs/fluxo.png)
+
+| Etapa | Quem faz |
 |---|---|
-| `camera.py` | Abre a câmera do flat (CSI) ou a webcam USB com a mesma interface |
-| `gestos.py` | Detecta a **mão aberta** e só dispara depois de segurar **1 segundo** |
-| `etapa1_camera.py` | Mostra a câmera ao vivo com os FPS |
-| `etapa2_gesto.py` | Detecta o gesto, mostra barra de progresso e "dispara o cadastro" |
-| `rosto.py` | Acha o rosto (478 pontos) e desenha a malha |
-| `poses.py` | Lógica das poses da cabeça: frente, esquerda, direita, cima, baixo |
-| `etapa3_rosto.py` | Calibra o "olhar de frente" e guia as 5 poses |
-| `banco.py` | Guarda pessoas e embeddings no SQLite (`dados/pessoas.db`) |
-| `embeddings.py` | Transforma o rosto em 128 números (modelo SFace) |
-| `etapa4_cadastro.py` | Cadastro completo: gesto, aviso, 5 poses, nome, gravação |
-| `reconhecer_teste.py` | Mostra o nome de quem está na frente da câmera |
-| `cadastros.py` | Lista e apaga cadastros |
-| `teclado.py` | Teclado virtual para a tela touch (com acentos) |
-| `etapa5_cadastro_touch.py` | Cadastro todo pelo toque, em tela cheia |
-| `teste_toque.py` | Mostra onde o toque cai, para conferir a precisão |
-| `test_teclado.py` | Testes do teclado virtual (não precisa de tela) |
-| `test_banco.py` | Testes do banco (não precisa de câmera) |
-| `test_gatilho.py` | Testes da lógica de segurar 1 s (não precisa de câmera) |
-| `test_poses.py` | Testes da lógica das poses (não precisa de câmera) |
+| Captura da imagem | OpenCV (webcam USB) |
+| Detectar pessoas | **YOLO11n** convertido para **NCNN** (sem PyTorch no Pi) |
+| Dar ID a cada pessoa | Rastreador próprio (`rastreador.py`): IoU + velocidade + resgate |
+| Contar | Linha virtual com histerese (`contagem.py`) |
+| Achar rosto, pose e mão | **MediaPipe** (FaceLandmarker e GestureRecognizer) |
+| Rosto → 128 números | **SFace** (OpenCV), com alinhamento por 5 pontos (recorte 112×112) |
+| Guardar / comparar | SQLite + similaridade de cosseno (média das 2 melhores poses) |
 
-## 1. Instalar (uma vez só)
+Detalhes de projeto:
+- O YOLO roda numa **linha de execução própria** (~12 detecções/s, entrada 320×320, 3 threads do NCNN) e o laço principal (~30 Hz) **extrapola as caixas** entre detecções.
+- Tarefas pesadas (rosto, embedding, gesto) são **escalonadas** para nunca caírem no mesmo quadro.
+- O painel é desenhado em **regiões com cache**, redesenhando só o que mudou.
 
-Copie esta pasta para o Pi em `/home/SEU_USUARIO/contador-pessoas`
-(pendrive, GitHub, e-mail para você mesmo... o que for mais fácil).
+## Resultados medidos
 
-Abra o terminal no Pi e rode, linha por linha:
+Medições feitas no próprio Raspberry Pi 5 (`yolo_teste.py`, uma pessoa em cena):
+
+| Configuração | Tempo por quadro | FPS (só inferência) |
+|---|---|---|
+| PyTorch, entrada 416 | 120 ms | 8,4 |
+| PyTorch, entrada 320 | 75 ms | 13,4 |
+| NCNN, entrada 320 (Ultralytics) | 23 ms | 43,7 |
+| NCNN, entrada 320 (runner próprio) | **19,1 ms** | **52,5** |
+
+![Latência do YOLO](docs/grafico_latencia.png)
+
+Trocar o PyTorch pelo NCNN tornou a inferência cerca de **3 a 4 vezes mais rápida** com o mesmo modelo. O FPS do sistema completo é menor, porque também captura, rastreia, reconhece e desenha duas telas. A primeira versão completa em sala rodou a 7,8 FPS (CPU 44%, 71 °C), o que motivou as otimizações das versões seguintes.
+
+## Hardware
+
+| Item | Detalhe |
+|---|---|
+| Computador | Raspberry Pi 5, Raspberry Pi OS 64 bits (Bookworm), Python 3.11 |
+| Câmera | Webcam USB Logitech 1080p |
+| Painel público | TV Full HD (1920×1080) |
+| Cadastro | Monitor touch de 8" (1280×800) |
+
+## Instalação
 
 ```bash
-sudo apt update && sudo apt full-upgrade -y
-sudo apt install -y python3-picamera2 python3-opencv wget
-
-# ambiente do projeto (o --system-site-packages é importante: é ele que
-# deixa o Python do projeto enxergar o picamera2 e o opencv do sistema)
+sudo apt update && sudo apt install -y python3-opencv python3-picamera2 python3-venv wget
 python3 -m venv --system-site-packages ~/contador
 source ~/contador/bin/activate
-
-cd ~/contador-pessoas
-pip install mediapipe
+git clone https://github.com/MateusCourel/contador-pessoas.git
+cd contador-pessoas
+pip install -r requirements.txt
 ```
 
-Baixe o modelo de gestos do Google (fica na mesma pasta dos arquivos .py):
+**Modelos** (não ficam no repositório; baixe uma vez na pasta do projeto):
 
 ```bash
 wget -O gesture_recognizer.task https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/latest/gesture_recognizer.task
-```
-
-Baixe também o modelo de rosto (etapa 3):
-
-```bash
 wget -O face_landmarker.task https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task
-```
-
-E o modelo de reconhecimento (etapa 4):
-
-```bash
 wget -O face_recognition_sface_2021dec.onnx https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx
 ```
 
-## 2. Rodar
+**Modelo do YOLO (NCNN):** crie a pasta `yolo11n_ncnn_model/` exportando o YOLO11n com a biblioteca Ultralytics (instalada à parte, só para exportar):
 
-Sempre que abrir um terminal novo, ative o ambiente antes:
+```bash
+python yolo_teste.py        # benchmark e exportação em 320x320
+python exportar_yolo.py     # opcional: modelo retangular 448x256 (melhor à distância)
+```
+
+## Como usar
 
 ```bash
 source ~/contador/bin/activate
-cd ~/contador-pessoas
+DISPLAY=:0 python principal.py
 ```
 
-Teste da lógica (não usa câmera, deve terminar com `OK`):
+Opções úteis:
 
 ```bash
-python test_gatilho.py
+python principal.py --nao-organizar-telas     # não mexe na posição das telas
+python principal.py --yolo-tamanho 448x256    # usa o modelo retangular
 ```
 
-**Etapa 1 — ver a câmera:**
+No Wayfire (Pi OS), o `organizar_telas.py` identifica sozinho a TV e o monitor touch (pelo que cada tela é, e não pela porta HDMI) e posiciona as janelas. Para abrir por ícone na área de trabalho, use `./instalar_atalho.sh`.
+
+**Cadastros (LGPD):**
 
 ```bash
-python etapa1_camera.py
+python cadastros.py                  # lista
+python cadastros.py apagar 3         # apaga um
+python cadastros.py apagar todos     # apaga tudo
 ```
 
-Deve abrir uma janela com a imagem ao vivo e os FPS. Aperte **Q** para sair.
+## Estrutura
 
-**Etapa 2 — gesto da mão aberta:**
+```
+principal.py   nucleo.py            programa principal e orquestração
+camera.py      deteccao.py          captura e YOLO (NCNN)
+rastreador.py  contagem.py          IDs e linha de contagem
+rosto.py  poses.py  embeddings.py   malha facial, poses, SFace
+banco.py  identidades.py  fluxo.py  SQLite, nomes e cadastro
+gestos.py  mao.py  teclado.py       gesto, esqueleto da mão, teclado virtual
+painel.py (TV)  console.py (touch)  interfaces
+telas.py  janelas.py  ponteiro.py  organizar_telas.py   duas telas no Wayfire
+test_*.py                           testes automatizados
+CHANGELOG.md                        histórico v0.1 a v0.7
+```
+
+## Testes
 
 ```bash
-python etapa2_gesto.py
+python -m unittest discover -p "test_*.py"
 ```
 
-Mostre a palma aberta para a câmera e segure. Uma barra enche durante 1 segundo;
-ao completar aparece "CADASTRO INICIADO!" na tela e no terminal. Tire a mão e
-espere ~3 s para poder disparar de novo.
+São 232 testes de lógica (rastreador, contagem, identidades, cadastro, banco, teclado, telas...). Eles não precisam de câmera nem de modelos.
 
-**Etapa 3 — rosto e poses da cabeça:**
+## Privacidade e LGPD
 
-```bash
-python test_poses.py      # deve terminar com OK
-python etapa3_rosto.py
-```
+- Só são guardados **nome e embeddings** (128 números por pose, 5 poses por pessoa). **Não há fotos nem vídeos gravados.**
+- O cadastro é **voluntário**, com aviso e consentimento na tela antes de começar.
+- Os dados ficam **apenas no dispositivo**, no arquivo `dados/pessoas.db` (que **não** deve ser enviado ao repositório; está no `.gitignore`).
+- Os cadastros podem ser **apagados** a qualquer momento (`cadastros.py`).
+- Embeddings faciais podem ser considerados **dados biométricos**; por isso o consentimento e a exclusão fazem parte do projeto.
 
-Primeiro fique parado olhando de frente até a barra laranja encher
-(calibração). Depois siga os pedidos na tela: frente, esquerda, direita, cima
-e baixo, segurando cada pose ~1 s. Teclas: **R** recomeça as poses, **C**
-calibra de novo, **Q** sai. No terminal aparece `>>> pose confirmada: ...`
-(na etapa 4 é aí que a foto será tirada).
+## Limitações e o que ainda não foi medido
 
-Se alguma pose ficar difícil ou fácil demais, ajuste `LIMITE_YAW` e
-`LIMITE_PITCH` em `poses.py`. Se "cima" e "baixo" aparecerem trocados, mude
-`INVERTER_CIMA_BAIXO` para `True`.
+- **A acurácia da contagem ainda não foi medida** formalmente (contagem manual × sistema). Por isso este repositório não cita um percentual de acerto.
+- As melhorias da v0.7 e v0.7.1 (inferência de entrada na porta, nome com `?`, soltura do nome, reconhecimento de rostos menores) passaram nos testes automáticos, mas **precisam de validação em sala com pessoas reais**.
+- O reconhecimento piora com rosto pequeno, de lado, borrado ou com pouca luz, e pessoas parecidas podem se confundir (por isso as margens e a regra de um nome por pessoa).
+- A porcentagem exibida é uma **escala de semelhança**, não uma probabilidade de acerto.
 
-**Etapa 4 — cadastrar uma pessoa:**
+## Dificuldades do caminho
 
-```bash
-python test_banco.py          # deve terminar com OK
-python etapa4_cadastro.py     # cadastra
-python reconhecer_teste.py    # confere se reconhece
-python cadastros.py           # lista; "apagar 3" apaga a pessoa de id 3
-```
+Parte importante do projeto foi fazer tudo funcionar no equipamento real:
 
-No cadastro: mão aberta 1 s, aceitar o aviso (**S**), olhar de frente, as 5
-poses, digitar o nome e **ENTER**. **ESC** cancela. Só os embeddings ficam
-em `dados/pessoas.db`; as fotos não são guardadas.
+- A **câmera CSI nunca foi reconhecida**; a solução foi a webcam USB, o que mudou o plano inicial.
+- **FPS baixo e 71 °C** na primeira versão em sala, resolvidos com detecção em thread própria, NCNN, desenho por regiões em cache e escalonamento das tarefas pesadas.
+- **Duas telas no Wayfire 0.7.5**, onde as regras de janela não funcionam: solução com `wlr-randr`, verificação com `xwininfo` e mouse virtual via `uinput`.
+- **Contagem falhando na porta** e **nomes duplicados** (três "Mateus" para uma pessoa), corrigidos com rastreador mais firme, inferência de entrada e unicidade de nomes.
+- **Nome "grudando" em outra pessoa** que passa na frente, tratado na v0.7.1.
 
-**Etapa 5 — cadastro pela tela touch:**
+O histórico completo está em [`CHANGELOG.md`](CHANGELOG.md).
 
-```bash
-python test_teclado.py          # deve terminar com OK
-python teste_toque.py           # confere se o toque acerta (Q sai)
-python etapa5_cadastro_touch.py            # tela cheia, para o monitor touch
-python etapa5_cadastro_touch.py --janela   # em janela, para testar
-```
+## Roadmap
 
-Tudo pode ser feito com o dedo: **CADASTRAR** (ou mão aberta), **ACEITO**,
-as 5 poses e o nome no teclado da tela. A primeira letra de cada palavra sai
-maiúscula sozinha. Para acentuar, toque no acento (´ ` ^ ~) e depois na vogal
-(`~` + `a` = ã). Nomes repetidos são recusados. O teclado do computador também
-funciona. Para os acentos aparecerem na tela é preciso ter o Pillow e a fonte
-DejaVu (`sudo apt install python3-pil fonts-dejavu-core`); sem eles o
-teclado funciona do mesmo jeito, só que sem acentos desenhados.
+- [ ] Validar a v0.7.1 em sala e medir a acurácia (contagem manual × sistema)
+- [ ] Recorte da cabeça em Full HD para reconhecer de mais longe
+- [ ] Iniciar o programa sozinho ao ligar o Pi
+- [ ] Painel web para acompanhar pelo celular, mapa de calor e alertas de lotação
 
-**Etapa 6 — programa principal (contagem + reconhecimento + cadastro):**
+## Equipe
 
-```bash
-pip install ncnn pillow           # uma vez só, com o ambiente ativo
-python yolo_ncnn_teste.py         # confere o YOLO em NCNN (cria yolo_ncnn_teste.jpg)
-python principal.py --janela      # teste em janelas
-DISPLAY=:0 python principal.py    # TV + monitor touch em tela cheia
-python principal.py --video teste.mp4   # usa um vídeo no lugar da câmera
-```
+- **Mateus Antonio Courel**
+- **João Marcos André Almeida**
+- **Davi Rodrigo de Miranda**
+- Orientador: **Ricardo Rall**
 
-Pré-requisito: a pasta `yolo11n_ncnn_model/` (criada pelo `yolo_teste.py`) e os
-três modelos das etapas anteriores na mesma pasta. A **TV** mostra o painel
-público; o **monitor touch** tem os botões (CADASTRAR, LINHA ▲▼, INVERTER
-SENTIDO, ZERAR, SAIR; zerar e sair pedem um segundo toque). A linha de contagem
-é horizontal: quem cruza para baixo na imagem conta como entrada (use INVERTER
-SENTIDO se a sua porta for o contrário). A posição da linha fica salva em
-`dados/config.json` e cada entrada/saída vai para `dados/eventos.csv` (só
-hora, evento e número temporário, sem dados pessoais). Nomes só aparecem na TV
-para quem se cadastrou; os demais são "Pessoa · ID n".
+## Licenças de terceiros
 
-### Usando o Thonny
+Este projeto usa componentes de terceiros, cada um com sua própria licença. Confira as originais antes de reutilizar:
 
-Em **Ferramentas → Opções → Interpretador → Alternative Python 3 executable**,
-aponte para `/home/SEU_USUARIO/contador/bin/python`. Depois abra
-`etapa1_camera.py` ou `etapa2_gesto.py` e clique em Run.
+| Componente | Licença (confira a oficial) |
+|---|---|
+| Ultralytics YOLO11 | AGPL-3.0 |
+| MediaPipe | Apache-2.0 |
+| OpenCV e OpenCV Zoo (SFace) | Apache-2.0 |
+| NCNN | BSD-3-Clause |
 
-## 3. Ajustes rápidos
+## Licença
 
-- **Só tenho a webcam USB:** em `etapa1_camera.py` / `etapa2_gesto.py`, troque
-  `preferir="csi"` por `preferir="usb"`. (Se o CSI falhar, ele já cai
-  automaticamente para a USB.)
-- **FPS baixo:** diminua para `largura=640, altura=480`. Não use a resolução
-  total dos 16MP — o Pi não precisa disso para detectar e fica bem mais lento.
-- **Foco:** com a câmera fixa no lugar definitivo, descomente a linha
-  `cam.travar_foco(...)` na etapa 1 e teste valores de posição até a imagem
-  ficar nítida. (Só faz efeito em câmeras com autofoco.)
-- **Gesto mais ou menos "sensível":** em `etapa2_gesto.py`, mude `segurar_s`
-  (tempo segurando) ou, em `DetectorDeGestos`, a `confianca_minima`.
-
-- **Webcam USB (Logitech C270):** o `camera.py` abre pelo libcamera e já troca
-  vermelho/azul sozinho, a 30 FPS. O FPS fixo é feito com
-  `v4l2-ctl --set-ctrl=exposure_dynamic_framerate=0`.
-
-## 4. Problemas comuns
-
-**Janela não abre / "Nenhuma câmera encontrada" logo depois de ter funcionado**
-Um programa antigo ainda está segurando a câmera. **Não use Ctrl+Z** para
-sair (isso só suspende e a câmera continua presa). Use **Q** na janela ou
-Ctrl+C. Para liberar à força: `pkill -9 -f etapa`.
-
-**"Nenhuma câmera encontrada"**
-Rode `rpicam-hello --list-cameras`. Se a câmera CSI não aparecer, veja o cabo
-(Pi desligado ao encaixar!) e se o sensor precisa de `dtoverlay` no
-`/boot/firmware/config.txt` (ex.: `dtoverlay=imx519`).
-
-**Erro de `Qt platform plugin "xcb"` ao abrir a janela**
-O MediaPipe instala um OpenCV próprio que briga com o do sistema. Remova o dele
-e o Python volta a usar o OpenCV do sistema:
-
-```bash
-pip uninstall -y opencv-contrib-python opencv-python
-```
-
-**`ModuleNotFoundError: picamera2`**
-O ambiente foi criado sem `--system-site-packages`. Apague (`rm -rf ~/contador`)
-e refaça o passo de criar o ambiente.
-
-**`ModuleNotFoundError: mediapipe`**
-O ambiente não está ativo. Rode `source ~/contador/bin/activate` (o terminal
-mostra `(contador)` no começo da linha quando está ativo).
-
-## 4b. Ajustes para sala cheia (v0.7)
-
-- **Alcance da detecção:** o modelo padrão tem entrada quadrada 320x320, o que
-  desperdiça quase metade da imagem (a câmera é 16:9). Gere um modelo
-  retangular, no ambiente que tem o `ultralytics`:
-  `python exportar_yolo.py` (448x256, quase o mesmo custo, ~40% mais detalhe)
-  ou `python exportar_yolo.py --largura 576 --altura 320` (mais alcance, mais
-  pesado). Copie a pasta gerada para o projeto e use
-  `python principal.py --yolo yolo11n_ncnn_model_448x256`. O tamanho é lido
-  do `metadata.yaml` da pasta.
-- **Entradas inferidas:** quem aparece já depois da linha e se afasta dela é
-  contado. Para desligar, coloque `"inferir_nascimento": false` em
-  `dados/config.json`.
-- **Porcentagem:** 50% é o mínimo para aceitar um nome; 99% é muito parecido.
-
-## 5. Roadmap
-
-- [x] 1. Câmera ao vivo (CSI ou USB)
-- [x] 2. Gesto da mão aberta como gatilho
-- [x] 3. Detectar rosto e direção da cabeça (pose guiada)
-- [x] 4. Cadastro com embeddings + SQLite
-- [x] 5. Tela touch com teclado virtual
-- [x] 6. Contagem de pessoas (YOLO) e reconhecimento de quem passa (programa principal, TV + touch)
-- [ ] 7. Painel web, mapa de calor e alertas
-- [ ] 8. Medir a taxa de acerto e melhorar o reconhecimento
-
-Veja o histórico de mudanças em [CHANGELOG.md](CHANGELOG.md).
-
-## 6. Privacidade
-
-O projeto lida com rostos, que são dado biométrico (LGPD). Por isso o
-`.gitignore` bloqueia fotos, bancos de dados e embeddings: **nunca** suba esses
-arquivos para o repositório. A ideia é guardar apenas os embeddings (números),
-não as fotos, e permitir apagar o cadastro de qualquer pessoa.
+O código deste repositório está sob a licença MIT (veja `LICENSE`). Os modelos baixados e as bibliotecas de terceiros seguem as licenças acima.
