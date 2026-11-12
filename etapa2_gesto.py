@@ -11,7 +11,7 @@ import time
 import cv2
 
 from camera import Camera
-from gestos import GESTO_MAO_ABERTA, DetectorDeGestos, GatilhoPorTempo
+from gestos import (GESTO_MAO_ABERTA, DetectorDeGestos, GatilhoPorTempo, desenhar_mao)
 
 
 def desenhar_barra(frame, progresso):
@@ -44,7 +44,7 @@ def main():
             if disparou:
                 print(">>> GESTO CONFIRMADO: iniciar cadastro!")
                 mensagem_ate = time.monotonic() + 2.0
-
+            desenhar_mao(frame, detector.pontos)  # esqueleto da mão
             texto = f"gesto: {gesto or '-'} ({confianca:.0%})"
             cv2.putText(frame, texto, (20, 40), cv2.FONT_HERSHEY_SIMPLEX,
                         1.0, (0, 255, 0), 2)

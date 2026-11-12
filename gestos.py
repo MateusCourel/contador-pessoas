@@ -11,6 +11,33 @@ import cv2
 GESTO_MAO_ABERTA = "Open_Palm"  # nome do gesto no MediaPipe
 
 
+# Pares de pontos da mão (0 = pulso, 4/8/12/16/20 = pontas dos dedos) que
+# formam o "esqueleto" desenhado na tela.
+LIGACOES_DA_MAO = [
+    (0, 1), (1, 2), (2, 3), (3, 4),            # polegar
+    (0, 5), (5, 6), (6, 7), (7, 8),            # indicador
+    (5, 9), (9, 10), (10, 11), (11, 12),       # médio
+    (9, 13), (13, 14), (14, 15), (15, 16),     # anelar
+    (13, 17), (17, 18), (18, 19), (19, 20),    # mindinho
+    (0, 17),                                   # lado da palma
+]
+
+
+def desenhar_mao(frame, pontos):
+    """Desenha o esqueleto da mão (linhas verdes, pontos vermelhos).
+
+    pontos: lista de 21 pares (x, y) entre 0 e 1, como devolve o detector.
+    Se for None ou vazia, não desenha nada."""
+    if not pontos:
+        return
+    h, w = frame.shape[:2]
+    xy = [(int(x * w), int(y * h)) for x, y in pontos]
+    for a, b in LIGACOES_DA_MAO:
+        cv2.line(frame, xy[a], xy[b], (0, 255, 0), 3, cv2.LINE_AA)
+    for p in xy:
+        cv2.circle(frame, p, 5, (0, 0, 255), -1, cv2.LINE_AA)
+
+
 class GatilhoPorTempo:
     """Dispara uma vez quando o gesto fica ativo por `segurar_s` segundos.
 
@@ -84,6 +111,8 @@ class DetectorDeGestos:
         self._reconhecedor = vision.GestureRecognizer.create_from_options(opcoes)
         self._confianca_minima = confianca_minima
         self._t0 = time.monotonic()
+        # pontos da mão do último quadro (para desenhar o esqueleto)
+        self.pontos = None
 
     def detectar(self, frame_bgr):
         """Devolve (nome_do_gesto, confiança) ou (None, 0.0)."""
@@ -93,6 +122,10 @@ class DetectorDeGestos:
         # o modo VIDEO exige um tempo em ms que sempre aumenta
         ms = int((time.monotonic() - self._t0) * 1000)
         resultado = self._reconhecedor.recognize_for_video(imagem, ms)
+        if resultado.hand_landmarks:
+            self.pontos = [(p.x, p.y) for p in resultado.hand_landmarks[0]]
+        else:
+            self.pontos = None
         if resultado.gestures and resultado.gestures[0]:
             melhor = resultado.gestures[0][0]
             if melhor.score >= self._confianca_minima:
